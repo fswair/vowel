@@ -30,6 +30,7 @@ env/
 # Experimental
 src/vowel/agent_utils.py
 AGENT_*.md
+tests/
 
 # IDE
 .vscode/
