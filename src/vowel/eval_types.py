@@ -11,6 +11,11 @@ class IsInstanceCase(BaseModel):
         examples=["int", "str", "bool", "list", "dict", "int | float", "str | None"],
     )
 
+    strict: Optional[bool] = Field(
+        default=None,
+        description="Whether to use strict mode for type validation. When True, performs stricter type checking.",
+    )
+
     def evaluate(self, output: Any) -> bool:
         return isinstance(output, eval(self.type))
 
@@ -91,6 +96,19 @@ class ContainsInputCase(BaseModel):
     )
 
 
+class PatternMatchCase(BaseModel):
+    """Regex pattern matching evaluation case. Validates that output matches a regex pattern."""
+
+    pattern: str = Field(
+        description="Regular expression pattern to match against the output (converted to string).",
+        examples=[r"^\d+$", r"^[A-Z]+$", r".*@.*\.com$", r"id: \d+"],
+    )
+    case_sensitive: bool = Field(
+        default=True,
+        description="Whether the regex matching should be case-sensitive.",
+    )
+
+
 class MatchCase(BaseModel):
     """Test case with input, expected output, and optional constraints."""
 
@@ -137,6 +155,15 @@ class MatchCase(BaseModel):
         ),
         examples=["output > 0", "len(output) == 3", "output % 2 == 0", "output in input"],
     )
+    pattern: Optional[str] = Field(
+        default=None,
+        description="Optional regex pattern to match against the output (converted to string) for this specific case.",
+        examples=[r"^\d+$", r"^[A-Z]+$", r".*@.*\.com$"],
+    )
+    case_sensitive: bool = Field(
+        default=True,
+        description="Whether the regex pattern matching should be case-sensitive (only used if pattern is specified).",
+    )
 
     @field_validator("inputs")
     @classmethod
@@ -167,6 +194,10 @@ class MatchCase(BaseModel):
     def has_assertion(self) -> bool:
         return self.assertion is not None
 
+    @property
+    def has_pattern(self) -> bool:
+        return self.pattern is not None
+
 
 class EvalCase(BaseModel):
     """Internal representation of an evaluation case with its data."""
@@ -175,8 +206,8 @@ class EvalCase(BaseModel):
         description="Unique identifier for this evaluation case.",
         examples=["IsInteger", "IsPositive", "TypeCheck", "CorrectLogic"],
     )
-    case_data: Union[IsInstanceCase, AssertionCase, DurationCase, ContainsInputCase] = Field(
-        description="The actual evaluation logic - can be type check, assertion, duration, or contains check."
+    case_data: Union[IsInstanceCase, AssertionCase, DurationCase, ContainsInputCase, PatternMatchCase] = Field(
+        description="The actual evaluation logic - can be type check, assertion, duration, contains check, or pattern match."
     )
 
     @property
@@ -194,6 +225,10 @@ class EvalCase(BaseModel):
     @property
     def has_contains_input(self) -> bool:
         return isinstance(self.case_data, ContainsInputCase)
+
+    @property
+    def has_pattern_match(self) -> bool:
+        return isinstance(self.case_data, PatternMatchCase)
 
 
 class DatasetCase(BaseModel):
@@ -225,12 +260,14 @@ class Evals(BaseModel):
         examples=["is_prime", "calculate_sum", "process_data", "validate_email"],
     )
 
-    evals: Dict[str, Union[IsInstanceCase, AssertionCase, DurationCase, ContainsInputCase]] = Field(
+    evals: Dict[str, Union[IsInstanceCase, AssertionCase, DurationCase, ContainsInputCase, PatternMatchCase]] = Field(
+        default_factory=dict,
         description=(
             "Dictionary of evaluation rules that apply to ALL test cases. "
             "Each key is a descriptive name, value is the evaluation case. "
             "Use IsInstanceCase for type checks, AssertionCase for custom logic, "
-            "DurationCase for performance constraints, ContainsInputCase for input containment."
+            "DurationCase for performance constraints, ContainsInputCase for input containment, "
+            "PatternMatchCase for regex pattern matching."
         ),
         examples=[
             {"IsInteger": {"type": "int"}, "IsPositive": {"assertion": "output > 0"}},
@@ -293,14 +330,14 @@ class EvalsFile(BaseModel):
                 continue
             try:
                 value = getattr(self, key)
-                if isinstance(value, dict) and "evals" in value and "dataset" in value:
+                if isinstance(value, dict) and "dataset" in value:
                     result[key] = Evals(id=key, **value)
             except:
                 continue
 
         if hasattr(self, "__pydantic_extra__"):
             for key, value in self.__pydantic_extra__.items():
-                if isinstance(value, dict) and "evals" in value and "dataset" in value:
+                if isinstance(value, dict) and "dataset" in value:
                     result[key] = Evals(id=key, **value)
 
         return result

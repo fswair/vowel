@@ -15,7 +15,7 @@ from pydantic_evals.reporting import EvaluationReport
 
 from .eval_types import Evals, EvalsFile
 from .evals import (AssertionEvaluator, ContainsInputEvaluator,
-                    TypeAdapterEvaluator)
+                    PatternMatchingEvaluator, TypeAdapterEvaluator)
 
 sys.path.insert(0, os.getcwd())
 
@@ -155,8 +155,9 @@ def to_dataset(evals: Evals, *, name: str) -> Dataset:
             global_evaluators.append(AssertionEvaluator(assertion, evaluation_name=eval_case.id))
         elif eval_case.has_typecheck:
             type_str = eval_case.case_data.type
+            strict = eval_case.case_data.strict
             global_evaluators.append(
-                TypeAdapterEvaluator(type=type_str, evaluation_name=eval_case.id)
+                TypeAdapterEvaluator(type=type_str, evaluation_name=eval_case.id, strict=strict)
             )
         elif eval_case.has_duration:
             duration_seconds = eval_case.case_data.duration
@@ -169,6 +170,16 @@ def to_dataset(evals: Evals, *, name: str) -> Dataset:
                     evaluation_name=eval_case.id,
                     case_sensitive=case_sensitive,
                     as_strings=as_strings,
+                )
+            )
+        elif eval_case.has_pattern_match:
+            pattern = eval_case.case_data.pattern
+            case_sensitive = eval_case.case_data.case_sensitive
+            global_evaluators.append(
+                PatternMatchingEvaluator(
+                    pattern=pattern,
+                    evaluation_name=eval_case.id,
+                    case_sensitive=case_sensitive,
                 )
             )
 
@@ -190,6 +201,15 @@ def to_dataset(evals: Evals, *, name: str) -> Dataset:
                 AssertionEvaluator(
                     match_case.assertion,
                     evaluation_name=f"CaseAssertion: {match_case.assertion[:50]}",
+                )
+            )
+
+        if match_case.has_pattern:
+            case_evaluators.append(
+                PatternMatchingEvaluator(
+                    pattern=match_case.pattern,
+                    evaluation_name=f"CasePattern: {match_case.pattern[:50]}",
+                    case_sensitive=match_case.case_sensitive,
                 )
             )
 

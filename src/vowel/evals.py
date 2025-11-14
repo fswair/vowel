@@ -1,4 +1,5 @@
 import os
+import re
 import typing
 from dataclasses import dataclass
 
@@ -14,8 +15,15 @@ if os.environ.get("LOGFIRE_ENABLED"):
 
 
 def prepare_env_and_condition(ctx: EvaluatorContext, condition: str) -> tuple[dict, str]:
+    actual_input = ctx.inputs
+    if isinstance(ctx.inputs, dict):
+        if "input" in ctx.inputs:
+            actual_input = ctx.inputs["input"]
+        elif "inputs" in ctx.inputs:
+            actual_input = ctx.inputs["inputs"]
+
     env = {
-        "input": ctx.inputs,
+        "input": actual_input,
         "output": ctx.output,
         "expected": ctx.expected_output,
         "metrics": ctx.metrics,
@@ -79,6 +87,12 @@ class ContainsInputEvaluator(Evaluator):
 
     def evaluate(self, ctx: EvaluatorContext) -> EvaluationReason:
         input_value = ctx.inputs
+        if isinstance(ctx.inputs, dict):
+            if "input" in ctx.inputs:
+                input_value = ctx.inputs["input"]
+            elif "inputs" in ctx.inputs:
+                input_value = ctx.inputs["inputs"]
+
         output_value = ctx.output
 
         try:
@@ -116,3 +130,27 @@ class ContainsInputEvaluator(Evaluator):
                 )
         except (TypeError, ValueError) as e:
             return EvaluationReason(value=False, reason=f"Containment check failed: {e}")
+
+
+@dataclass
+class PatternMatchingEvaluator(Evaluator):
+
+    pattern: str
+    evaluation_name: str = "RegEx Match"
+    case_sensitive: bool = True
+
+    def evaluate(self, ctx: EvaluatorContext) -> EvaluationReason:
+
+        flags = 0 if self.case_sensitive else re.IGNORECASE
+        output_str = str(ctx.output)
+
+        if re.search(self.pattern, output_str, flags):
+            return EvaluationReason(
+                value=True,
+                reason=f"Output matches the regex pattern {self.pattern!r}",
+            )
+        else:
+            return EvaluationReason(
+                value=False,
+                reason=f"Output does not match the regex pattern {self.pattern!r}",
+            )
