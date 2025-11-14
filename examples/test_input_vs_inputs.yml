@@ -1,0 +1,47 @@
+# Test input vs inputs distinction
+
+# Test with single input (passes one argument)
+len:
+  evals:
+    IsInteger:
+      type: int
+  dataset:
+    - case:
+        input: [1, 2, 3] # len([1, 2, 3]) -> 3
+        expected: 3
+    - case:
+        input: "hello" # len("hello") -> 5
+        expected: 5
+
+# Test with multiple inputs (passes multiple arguments)
+# Create a custom function for this test
+pow:
+  evals:
+    IsNumber:
+      type: "int | float"
+  dataset:
+    - case:
+        inputs: [2, 3] # pow(2, 3) -> 8
+        expected: 8
+    - case:
+        inputs: [5, 2] # pow(5, 2) -> 25
+        expected: 25
+    - case:
+        inputs: [10, 0] # pow(10, 0) -> 1
+        expected: 1
+
+# Test max with multiple inputs
+max:
+  evals:
+    IsNumber:
+      type: "int | float"
+  dataset:
+    - case:
+        inputs: [1, 2, 3] # max(1, 2, 3) -> 3
+        expected: 3
+    - case:
+        inputs: [10, 5, 8] # max(10, 5, 8) -> 10
+        expected: 10
+    - case:
+        input: [1, 2, 3] # max([1, 2, 3]) -> 3
+        expected: 3
