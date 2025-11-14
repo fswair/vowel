@@ -466,6 +466,119 @@ generate_html:
         contains: "<a>" # This must also be in output
 ```
 
+### 7. Pattern Matching Evaluator (Regex)
+
+Validates that output matches a regular expression pattern. Works at both global and case levels.
+
+```yaml
+# Global level - applies to all cases
+function_name:
+  evals:
+    PatternName:
+      pattern: "regex_pattern"
+      case_sensitive: true  # Optional, default: true
+
+# Case level - specific to one case
+function_name:
+  dataset:
+    - case:
+        input: "test"
+        pattern: "regex_pattern"
+        case_sensitive: false  # Optional
+```
+
+**Examples:**
+
+```yaml
+# Validate email format
+validate_email:
+  evals:
+    HasAtSign:
+      pattern: "@"
+    ValidDomain:
+      pattern: "\\.(com|org|net)$"
+  dataset:
+    - case:
+        input: "test@example.com"
+        expected: "test@example.com"
+
+    - case:
+        input: "admin@test.org"
+        expected: "admin@test.org"
+        pattern: "\\.org$" # Case-specific pattern
+
+# Format validation
+format_id:
+  evals:
+    CorrectFormat:
+      pattern: "^id: \\d+$"
+      case_sensitive: true
+  dataset:
+    - case:
+        input: 123
+        expected: "id: 123"
+
+    - case:
+        input: 456
+        expected: "ID: 456"
+        pattern: "^ID: \\d+$" # Different pattern for this case
+
+# Case insensitive matching
+normalize_text:
+  dataset:
+    - case:
+        input: "Hello"
+        expected: "HELLO WORLD"
+        pattern: "hello"
+        case_sensitive: false # Matches "HELLO" too
+
+    - case:
+        input: "test"
+        expected: "TEST123"
+        pattern: "^[A-Z]+\\d+$" # Only uppercase letters + digits
+
+# Multiple patterns
+phone_format:
+  evals:
+    HasDigits:
+      pattern: "\\d+"
+  dataset:
+    - case:
+        input: "1234567890"
+        expected: "+1 (123) 456-7890"
+        pattern: "^\\+\\d+ \\(\\d{3}\\) \\d{3}-\\d{4}$"
+
+    - case:
+        input: "9876543210"
+        expected: "987-654-3210"
+        pattern: "^\\d{3}-\\d{3}-\\d{4}$"
+```
+
+**Common Regex Patterns:**
+
+```yaml
+# Numbers only
+pattern: "^\\d+$"
+
+# Uppercase letters only
+pattern: "^[A-Z]+$"
+
+# Email format
+pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
+
+# URL format
+pattern: "^https?://.*"
+
+# Contains specific word
+pattern: "\\bword\\b"
+
+# Starts with prefix
+pattern: "^prefix"
+
+# Ends with suffix
+pattern: "suffix$"
+```
+
 ## 🎨 Advanced Examples
 
 ### Using Multiple Evaluators
