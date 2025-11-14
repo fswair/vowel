@@ -610,10 +610,9 @@ vowel test.yml -f len,json.dumps # (or --filter)
 
 ## 📚 Documentation
 
-- **[API_USAGE.md](API_USAGE.md)** - Programmatic API guide
-- **[RUNEVALS_GUIDE.md](RUNEVALS_GUIDE.md)** - RunEvals fluent API
-- **[ASSERTION_CONTEXT.md](ASSERTION_CONTEXT.md)** - Assertion variables
-- **[examples/](examples/)** - Working examples
+- **[RUNEVALS_GUIDE.md](https://github.com/fswair/vowel/blob/main/docs/RUNEVALS_GUIDE.md)** - RunEvals fluent API
+- **[ASSERTION_CONTEXT.md](https://github.com/fswair/vowel/blob/main/docs/ASSERTION_CONTEXT.md)** - Assertion variables
+- **[EXAMPLES/](https://github.com/fswair/vowel/blob/main/examples/)** - Working examples
 
 ## 📄 License
 
