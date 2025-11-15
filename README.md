@@ -35,14 +35,17 @@ vowel multi_evals.yml
 # Debug mode - logfire enabled (detailed logging)
 vowel multi_evals.yml --debug
 
-# Test only specific functions
+# Test only specific functions (comma-separated)
+vowel multi_evals.yml -f make_list,make_square
+
+# Test specific functions (multiple -f flags)
 vowel multi_evals.yml -f make_list -f make_square
 
 # Verbose mode - show error details
 vowel multi_evals.yml -v
 
 # Use all options together
-vowel tests.yml -f uppercase --debug -v
+vowel tests.yml -f uppercase,lowercase --debug -v
 
 # Help
 vowel --help
@@ -51,7 +54,7 @@ vowel --help
 ### CLI Options
 
 - `--debug`: Enables debug mode with detailed logging via logfire
-- `-f, --filter`: Tests only the specified function(s) (can be used multiple times)
+- `-f, --filter`: Tests only the specified function(s). Use comma-separated values or multiple flags: `-f func1,func2` or `-f func1 -f func2`
 - `-v, --verbose`: Shows detailed output including error reasons
 - `--help`: Shows help message
 
@@ -579,6 +582,142 @@ pattern: "^prefix"
 pattern: "suffix$"
 ```
 
+### 8. LLM Judge Evaluator
+
+Uses a Language Model to evaluate outputs based on a custom rubric. Ideal for semantic evaluation, quality assessment, and cases where rule-based checking is insufficient.
+
+```yaml
+function_name:
+  evals:
+    JudgeName:
+      rubric: "Evaluation criteria/question for the LLM"
+      include: # Optional, what context to provide to LLM
+        - input # Include the input
+        - expected_output # Include expected output
+      config: # Model configuration
+        model: "provider:model_name" # Required (or set JUDGE_MODEL env var)
+        temperature: 0.7 # Optional
+        max_tokens: 2096 # Optional
+        # ... other optional model parameters
+        # parameters will be passed into
+        # pydantic_ai.settings.ModelSettings ctor
+```
+
+**Configuration:**
+
+- `rubric`: **Required** - The evaluation criteria or question for the LLM
+- `include`: **Optional** - List of context variables. Valid options:
+  - `input`: Include function input
+  - `expected_output`: Include expected output
+  - **Note:** Output is always included automatically
+- `config`: Model configuration
+  - `model`: **Required** (unless `JUDGE_MODEL` environment variable is set)
+  - All other parameters are optional (temperature, max_tokens, top_p, etc.)
+
+**Examples:**
+
+```yaml
+# Basic semantic equivalence check
+translate_to_english:
+  evals:
+    SemanticMatch:
+      rubric: "Does the output have the same meaning as the expected output?"
+      include:
+        - expected_output
+      config:
+        model: "groq:qwen/qwen-2.5-72b-instruct"
+        temperature: 0.0
+  dataset:
+    - case:
+        input: "Bonjour"
+        expected: "Hello"
+
+    - case:
+        input: "Comment allez-vous?"
+        expected: "How are you?"
+
+# Grammar and style checking
+generate_response:
+  evals:
+    IsGrammaticallyCorrect:
+      rubric: "Is the output grammatically correct and well-formatted?"
+      config:
+        model: "groq:qwen/qwen-2.5-72b-instruct"
+        temperature: 0.0
+        max_tokens: 512
+  dataset:
+    - case:
+        input: "Write a greeting"
+        expected: "Hello! How can I help you today?"
+
+# Quality assessment with input context
+summarize_text:
+  evals:
+    IsGoodSummary:
+      rubric: "Is the output a good summary of the input text? Does it capture the main points?"
+      include:
+        - input
+      config:
+        model: "openai:gpt-4o-mini"
+        temperature: 0.1
+  dataset:
+    - case:
+        input: "Long article text here..."
+        expected: "Brief summary..."
+
+# Using environment variable for model
+# Set: export JUDGE_MODEL="groq:qwen/qwen-2.5-72b-instruct"
+check_correctness:
+  evals:
+    AnswerQuality:
+      rubric: "Does the output correctly answer the question based on the input?"
+      include:
+        - input
+        - expected_output
+      config:
+        temperature: 0.0 # model comes from JUDGE_MODEL env var
+  dataset:
+    - case:
+        input: "What is 2+2?"
+        expected: "4"
+
+# Multiple criteria with different judges
+write_code:
+  evals:
+    Correctness:
+      rubric: "Is the code functionally correct?"
+      include:
+        - input
+      config:
+        model: "openai:gpt-4o"
+        temperature: 0.0
+
+    Readability:
+      rubric: "Is the code well-structured and readable?"
+      config:
+        model: "openai:gpt-4o"
+        temperature: 0.0
+  dataset:
+    - case:
+        input: "Write a function to reverse a string"
+        expected: "def reverse(s): return s[::-1]"
+```
+
+**Supported Models:**
+
+- **OpenAI**: `openai:gpt-4o`, `openai:gpt-4o-mini`, `openai:gpt-4-turbo`
+- **Groq**: `groq:llama-3.3-70b-versatile`, `groq:qwen/qwen-2.5-72b-instruct`
+- **Anthropic**: `anthropic:claude-3-5-sonnet-20241022`
+- Any model supported by [pydantic-ai](https://ai.pydantic.dev/)
+
+**Tips:**
+
+- Use `temperature: 0.0` for consistent evaluation
+- Be specific in your rubric - clear criteria = better evaluation
+- Use `include: [input, expected_output]` when the LLM needs full context
+- Set `JUDGE_MODEL` environment variable to avoid repeating model config
+- Combine with other evaluators for comprehensive testing
+
 ## 🎨 Advanced Examples
 
 ### Using Multiple Evaluators
@@ -717,8 +856,11 @@ vowel test.yml
 # Test only one
 vowel test.yml -f len
 
-# Test a few
-vowel test.yml -f len,json.dumps # (or --filter)
+# Test multiple (comma-separated)
+vowel test.yml -f len,json.dumps
+
+# Test multiple (separate flags)
+vowel test.yml -f len -f json.dumps -f make_list
 ```
 
 ## 📚 Documentation
