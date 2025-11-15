@@ -4,8 +4,9 @@ import typing
 from dataclasses import dataclass
 
 from pydantic.type_adapter import TypeAdapter
+from pydantic_ai.settings import ModelSettings
 from pydantic_evals.evaluators import (EvaluationReason, Evaluator,
-                                       EvaluatorContext)
+                                       EvaluatorContext, LLMJudge)
 
 if os.environ.get("LOGFIRE_ENABLED"):
     import logfire
@@ -154,3 +155,38 @@ class PatternMatchingEvaluator(Evaluator):
                 value=False,
                 reason=f"Output does not match the regex pattern {self.pattern!r}",
             )
+
+
+def create_llm_judge(
+    rubric: str,
+    include: list[str] | None = None,
+    config: dict | None = None,
+) -> LLMJudge:
+    if config is None:
+        config = {}
+    
+    model = config.pop("model", None) or os.getenv("JUDGE_MODEL")
+    if not model:
+        raise ValueError("'model' must be specified in config or set JUDGE_MODEL environment variable")
+    
+    include_input = False
+    include_expected_output = False
+    
+    if include:
+        include_input = "input" in include
+        include_expected_output = "expected_output" in include
+    
+    model_settings_kwargs = {}
+    for key, value in config.items():
+        if value is not None:
+            model_settings_kwargs[key] = value
+    
+    model_settings = ModelSettings(**model_settings_kwargs) if model_settings_kwargs else None
+    
+    return LLMJudge(
+        model=model,
+        rubric=rubric,
+        include_input=include_input,
+        include_expected_output=include_expected_output,
+        model_settings=model_settings,
+    )

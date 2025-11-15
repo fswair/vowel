@@ -1,4 +1,5 @@
-from typing import Any, Dict, Optional, Union
+import os
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -109,6 +110,61 @@ class PatternMatchCase(BaseModel):
     )
 
 
+class LLMJudgeCase(BaseModel):
+    """LLM Judge evaluation case. Uses an LLM to evaluate the output based on a rubric."""
+
+    rubric: str = Field(
+        description="The rubric/criteria that the LLM should use to evaluate the output.",
+        examples=[
+            "Does the output equivalent to the expected output?",
+            "Is the output grammatically correct?",
+            "Does the response answer the question accurately?",
+        ],
+    )
+    include: List[str] = Field(
+        default_factory=list,
+        description="List of context variables to include in the evaluation. Valid options: 'input', 'expected_output'.",
+        examples=[["input"], ["expected_output"], ["input", "expected_output"]],
+    )
+    config: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Configuration for the LLM model. 'model' is required unless JUDGE_MODEL env var is set. Other parameters are optional.",
+    )
+
+    @field_validator("include")
+    @classmethod
+    def validate_include(cls, v: Optional[List[str]]) -> List[str]:
+        """Validate that include only contains valid options."""
+        if v is None:
+            return []
+        
+        valid_options = {"input", "expected_output"}
+        invalid_options = set(v) - valid_options
+        
+        if invalid_options:
+            raise ValueError(
+                f"Invalid options in 'include': {invalid_options}. "
+                f"Valid options are: {valid_options}"
+            )
+        
+        return v
+
+    @field_validator("config")
+    @classmethod
+    def validate_config(cls, v: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """Validate that model is specified either in config or JUDGE_MODEL env var."""
+        if v is None:
+            v = {}
+        
+        if "model" not in v and not os.getenv("JUDGE_MODEL"):
+            raise ValueError(
+                "'model' must be specified in config or set JUDGE_MODEL environment variable"
+            )
+        
+        config = {k: v for k, v in v.items() if v is not None}
+        
+        return config
+
 class MatchCase(BaseModel):
     """Test case with input, expected output, and optional constraints."""
 
@@ -206,8 +262,8 @@ class EvalCase(BaseModel):
         description="Unique identifier for this evaluation case.",
         examples=["IsInteger", "IsPositive", "TypeCheck", "CorrectLogic"],
     )
-    case_data: Union[IsInstanceCase, AssertionCase, DurationCase, ContainsInputCase, PatternMatchCase] = Field(
-        description="The actual evaluation logic - can be type check, assertion, duration, contains check, or pattern match."
+    case_data: Union[IsInstanceCase, AssertionCase, DurationCase, ContainsInputCase, PatternMatchCase, LLMJudgeCase] = Field(
+        description="The actual evaluation logic - can be type check, assertion, duration, contains check, pattern match, or LLM judge."
     )
 
     @property
@@ -229,6 +285,10 @@ class EvalCase(BaseModel):
     @property
     def has_pattern_match(self) -> bool:
         return isinstance(self.case_data, PatternMatchCase)
+
+    @property
+    def has_llm_judge(self) -> bool:
+        return isinstance(self.case_data, LLMJudgeCase)
 
 
 class DatasetCase(BaseModel):
@@ -260,7 +320,7 @@ class Evals(BaseModel):
         examples=["is_prime", "calculate_sum", "process_data", "validate_email"],
     )
 
-    evals: Dict[str, Union[IsInstanceCase, AssertionCase, DurationCase, ContainsInputCase, PatternMatchCase]] = Field(
+    evals: Dict[str, Union[IsInstanceCase, AssertionCase, DurationCase, ContainsInputCase, PatternMatchCase, LLMJudgeCase]] = Field(
         default_factory=dict,
         description=(
             "Dictionary of evaluation rules that apply to ALL test cases. "

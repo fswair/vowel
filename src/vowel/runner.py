@@ -16,19 +16,10 @@ class RunEvals:
     Fluent API for running evaluations.
 
     Examples:
-        # From file
         RunEvals.from_file("evals.yml").run()
-
-        # From Evals object
         RunEvals.from_evals(evals_obj, functions={"func": func}).run()
-
-        # From multiple Evals
         RunEvals.from_evals([evals1, evals2], functions={...}).run()
-
-        # From dict/YAML string
         RunEvals.from_source(yaml_str).run()
-
-        # With filtering and debug
         RunEvals.from_file("evals.yml").filter(["func1", "func2"]).debug().run()
     """
 
@@ -96,29 +87,17 @@ class RunEvals:
             RunEvals instance
 
         Examples:
-            # Single Evals
             RunEvals.from_evals(evals_obj, functions={"func": func}).run()
-
-            # Multiple Evals
             RunEvals.from_evals([evals1, evals2], functions={...}).run()
         """
-        # Convert Evals object(s) to dict format
         if isinstance(evals, Evals):
             for i, case in enumerate(evals.dataset):
-                # Handle string inputs - convert to proper Python objects
                 if case.case.input is not None and isinstance(case.case.input, str):
-                    # Use ast.literal_eval to safely parse literal expressions
-                    # and avoid executing arbitrary code or referencing
-                    # undefined names (which caused NameError previously).
                     try:
                         evals.dataset[i].case.input = ast.literal_eval(case.case.input)
                     except (ValueError, SyntaxError):
-                        # If it's not a literal (shouldn't happen if LLM obeys
-                        # instructions), leave it as-is so downstream code can
-                        # handle/report the invalid case.
                         pass
 
-                # Handle string inputs list - convert each element
                 if case.case.inputs is not None:
                     for j, inp in enumerate(case.case.inputs):
                         if isinstance(inp, str):
@@ -129,7 +108,6 @@ class RunEvals:
 
             source_dict = {evals.id: evals.model_dump(exclude={"id"})}
         else:
-            # Sequence of Evals objects
             source_dict = {}
             for eval_obj in evals:
                 if not isinstance(eval_obj, Evals):

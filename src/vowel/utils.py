@@ -15,7 +15,8 @@ from pydantic_evals.reporting import EvaluationReport
 
 from .eval_types import Evals, EvalsFile
 from .evals import (AssertionEvaluator, ContainsInputEvaluator,
-                    PatternMatchingEvaluator, TypeAdapterEvaluator)
+                    PatternMatchingEvaluator, TypeAdapterEvaluator,
+                    create_llm_judge)
 
 sys.path.insert(0, os.getcwd())
 
@@ -182,6 +183,17 @@ def to_dataset(evals: Evals, *, name: str) -> Dataset:
                     case_sensitive=case_sensitive,
                 )
             )
+        elif eval_case.has_llm_judge:
+            rubric = eval_case.case_data.rubric
+            include = eval_case.case_data.include
+            config = eval_case.case_data.config or {}
+            judge = create_llm_judge(
+                rubric=rubric,
+                include=include,
+                config=config,
+            )
+            judge.evaluation_name = eval_case.id
+            global_evaluators.append(judge)
 
     for dataset_case in evals.dataset:
         match_case = dataset_case.case
