@@ -164,25 +164,27 @@ def create_llm_judge(
 ) -> LLMJudge:
     if config is None:
         config = {}
-    
+
     model = config.pop("model", None) or os.getenv("JUDGE_MODEL")
     if not model:
-        raise ValueError("'model' must be specified in config or set JUDGE_MODEL environment variable")
-    
+        raise ValueError(
+            "'model' must be specified in config or set JUDGE_MODEL environment variable"
+        )
+
     include_input = False
     include_expected_output = False
-    
+
     if include:
         include_input = "input" in include
         include_expected_output = "expected_output" in include
-    
+
     model_settings_kwargs = {}
     for key, value in config.items():
         if value is not None:
             model_settings_kwargs[key] = value
-    
+
     model_settings = ModelSettings(**model_settings_kwargs) if model_settings_kwargs else None
-    
+
     return LLMJudge(
         model=model,
         rubric=rubric,

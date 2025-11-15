@@ -137,16 +137,16 @@ class LLMJudgeCase(BaseModel):
         """Validate that include only contains valid options."""
         if v is None:
             return []
-        
+
         valid_options = {"input", "expected_output"}
         invalid_options = set(v) - valid_options
-        
+
         if invalid_options:
             raise ValueError(
                 f"Invalid options in 'include': {invalid_options}. "
                 f"Valid options are: {valid_options}"
             )
-        
+
         return v
 
     @field_validator("config")
@@ -155,15 +155,16 @@ class LLMJudgeCase(BaseModel):
         """Validate that model is specified either in config or JUDGE_MODEL env var."""
         if v is None:
             v = {}
-        
+
         if "model" not in v and not os.getenv("JUDGE_MODEL"):
             raise ValueError(
                 "'model' must be specified in config or set JUDGE_MODEL environment variable"
             )
-        
+
         config = {k: v for k, v in v.items() if v is not None}
-        
+
         return config
+
 
 class MatchCase(BaseModel):
     """Test case with input, expected output, and optional constraints."""
@@ -262,7 +263,14 @@ class EvalCase(BaseModel):
         description="Unique identifier for this evaluation case.",
         examples=["IsInteger", "IsPositive", "TypeCheck", "CorrectLogic"],
     )
-    case_data: Union[IsInstanceCase, AssertionCase, DurationCase, ContainsInputCase, PatternMatchCase, LLMJudgeCase] = Field(
+    case_data: Union[
+        IsInstanceCase,
+        AssertionCase,
+        DurationCase,
+        ContainsInputCase,
+        PatternMatchCase,
+        LLMJudgeCase,
+    ] = Field(
         description="The actual evaluation logic - can be type check, assertion, duration, contains check, pattern match, or LLM judge."
     )
 
@@ -320,7 +328,17 @@ class Evals(BaseModel):
         examples=["is_prime", "calculate_sum", "process_data", "validate_email"],
     )
 
-    evals: Dict[str, Union[IsInstanceCase, AssertionCase, DurationCase, ContainsInputCase, PatternMatchCase, LLMJudgeCase]] = Field(
+    evals: Dict[
+        str,
+        Union[
+            IsInstanceCase,
+            AssertionCase,
+            DurationCase,
+            ContainsInputCase,
+            PatternMatchCase,
+            LLMJudgeCase,
+        ],
+    ] = Field(
         default_factory=dict,
         description=(
             "Dictionary of evaluation rules that apply to ALL test cases. "

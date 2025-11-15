@@ -1,5 +1,6 @@
 import os
 import sys
+
 import dotenv
 
 if "--debug" not in sys.argv:
@@ -12,6 +13,8 @@ from pathlib import Path
 import click
 
 dotenv.load_dotenv()
+
+
 @click.command()
 @click.argument("yaml_file", type=click.Path(exists=True, path_type=Path))
 @click.option("--debug", is_flag=True, help="Enable debug mode with logfire")
