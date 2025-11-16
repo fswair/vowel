@@ -169,6 +169,11 @@ class LLMJudgeCase(BaseModel):
 class MatchCase(BaseModel):
     """Test case with input, expected output, and optional constraints."""
 
+    id: Optional[str] = Field(
+        default=None,
+        description="Optional unique identifier for this test case.",
+        examples=["test_positive_numbers", "edge_case_empty_list", "error_invalid_input"],
+    )
     input: Optional[Any] = Field(
         default=None,
         description=(
@@ -308,7 +313,7 @@ class DatasetCase(BaseModel):
 
     @property
     def id(self) -> Optional[str]:
-        return None
+        return self.case.id
 
 
 class Evals(BaseModel):

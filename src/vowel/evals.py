@@ -38,6 +38,7 @@ def prepare_env_and_condition(ctx: EvaluatorContext, condition: str) -> tuple[di
         "expected": ctx.expected_output,
         "metrics": ctx.metrics,
         "metadata": ctx.metadata,
+        "duration": ctx.duration,
     }
 
     for key in env:

@@ -12,7 +12,8 @@ from typing import Callable, Dict, List, Optional, Union
 import click
 import yaml
 from pydantic_evals import Case, Dataset
-from pydantic_evals.evaluators import Contains, EqualsExpected, MaxDuration
+from pydantic_evals.evaluators import (Contains, EqualsExpected, Evaluator,
+                                       MaxDuration)
 from pydantic_evals.reporting import EvaluationReport
 
 from .eval_types import Evals, EvalsFile
@@ -162,8 +163,8 @@ def load_evals(source: Union[str, Path, dict, EvalsFile]) -> Dict[str, Evals]:
 
 
 def to_dataset(evals: Evals, *, name: str) -> Dataset:
-    dataset_cases = []
-    global_evaluators = []
+    dataset_cases: List[Case] = []
+    global_evaluators: List[Evaluator] = []
 
     for eval_case in evals.eval_cases:
         if eval_case.has_assertion:
@@ -249,6 +250,10 @@ def to_dataset(evals: Evals, *, name: str) -> Dataset:
         else:
             display_input = f"input: {match_case.input}"
             input_value = {"input": match_case.input}
+
+        if any(case for case in dataset_cases if input_value == case.inputs):
+            print("Already exists in dataset, skipping duplicate case.")
+            continue
 
         dataset_cases.append(
             Case(

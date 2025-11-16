@@ -28,9 +28,10 @@ env/
 .env
 
 # Experimental
-src/vowel/agent_utils.py
+src/vowel/ai.py
 AGENT_*.md
 tests/
+eval_gen.py
 
 # IDE
 .vscode/
