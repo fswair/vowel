@@ -867,7 +867,7 @@ vowel test.yml -f len -f json.dumps -f make_list
 
 - **[RUNEVALS_GUIDE.md](https://github.com/fswair/vowel/blob/main/docs/RUNEVALS_GUIDE.md)** - RunEvals fluent API
 - **[ASSERTION_CONTEXT.md](https://github.com/fswair/vowel/blob/main/docs/ASSERTION_CONTEXT.md)** - Assertion variables
-- **[EXAMPLES/](https://github.com/fswair/vowel/blob/main/examples/)** - Working examples
+- **[EXAMPLES/](https://github.com/fswair/vowel/blob/main/examples/)** - Working examples here
 
 ## 📄 License
 
