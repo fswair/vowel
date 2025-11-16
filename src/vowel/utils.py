@@ -1,5 +1,7 @@
+import asyncio
 import builtins
 import importlib
+import inspect
 import os
 import sys
 from datetime import timedelta
@@ -21,34 +23,47 @@ from .evals import (AssertionEvaluator, ContainsInputEvaluator,
 sys.path.insert(0, os.getcwd())
 
 
-def create_unpacking_wrapper(func: Callable) -> Callable:
+def unpack_inputs(func: Callable) -> Callable:
     """
     Create a wrapper that handles both single input and multiple inputs.
+    Supports both sync and async functions.
 
     Expects a dict with either:
     - {'input': value} -> passes value as single argument: func(value)
     - {'inputs': [val1, val2, ...]} -> unpacks as multiple arguments: func(val1, val2, ...)
 
     Args:
-        func: The function to wrap
+        func: The function to wrap (sync or async)
 
     Returns:
         Wrapped function that accepts dict with 'input' or 'inputs' key
     """
+    is_async = inspect.iscoroutinefunction(func)
 
-    @wraps(func)
-    def wrapper(arg_dict):
-        if isinstance(arg_dict, dict):
-            if "inputs" in arg_dict:
+    if is_async:
 
-                return func(*arg_dict["inputs"])
-            elif "input" in arg_dict:
+        @wraps(func)
+        async def async_wrapper(arg_dict):
+            if isinstance(arg_dict, dict):
+                if "inputs" in arg_dict:
+                    return await func(*arg_dict["inputs"])
+                elif "input" in arg_dict:
+                    return await func(arg_dict["input"])
+            return await func(arg_dict)
 
-                return func(arg_dict["input"])
+        return async_wrapper
+    else:
 
-        return func(arg_dict)
+        @wraps(func)
+        def sync_wrapper(arg_dict):
+            if isinstance(arg_dict, dict):
+                if "inputs" in arg_dict:
+                    return func(*arg_dict["inputs"])
+                elif "input" in arg_dict:
+                    return func(arg_dict["input"])
+            return func(arg_dict)
 
-    return wrapper
+        return sync_wrapper
 
 
 def import_function(module_path: str) -> Callable:
@@ -262,10 +277,15 @@ class EvalResult:
     def has_failures(self) -> bool:
         if self.report is None:
             return False
-        return any(
-            any(not assertion.value for assertion in case.assertions.values())
-            for case in self.report.cases
-        )
+        for case in self.report.cases:
+            if hasattr(case, "error") and case.error is not None:
+                return True
+            for assertion in case.assertions.values():
+                if not assertion.value:
+                    return True
+                if hasattr(assertion, "error") and assertion.error is not None:
+                    return True
+        return False
 
 
 class EvalSummary:
@@ -528,8 +548,13 @@ def run_evals(
 
         try:
             dataset = to_dataset(name=eval_id, evals=evals)
-            wrapped_func = create_unpacking_wrapper(func)
-            report = dataset.evaluate_sync(wrapped_func)
+            wrapped_func = unpack_inputs(func)
+
+            if inspect.iscoroutinefunction(wrapped_func):
+                report = asyncio.run(dataset.evaluate(wrapped_func))
+            else:
+                report = dataset.evaluate_sync(wrapped_func)
+
             results.append(EvalResult(eval_id, report=report))
         except Exception as e:
             if debug:

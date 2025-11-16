@@ -1,18 +1,27 @@
+import importlib.util
 import os
 import re
 import typing
 from dataclasses import dataclass
 
+import dotenv
 from pydantic.type_adapter import TypeAdapter
 from pydantic_ai.settings import ModelSettings
 from pydantic_evals.evaluators import (EvaluationReason, Evaluator,
                                        EvaluatorContext, LLMJudge)
 
-if os.environ.get("LOGFIRE_ENABLED"):
-    import logfire
+dotenv.load_dotenv()
 
-    logfire.configure()
-    logfire.instrument_pydantic_ai()
+if os.environ.get("LOGFIRE_ENABLED") in ("1", "true", "True"):
+    if importlib.util.find_spec("logfire"):
+        import logfire
+
+        logfire.configure()
+        logfire.instrument_pydantic_ai()
+    else:
+        raise ImportError(
+            "LOGFIRE_ENABLED is set but logfire is not installed. Please install logfire or set LOGFIRE_ENABLED=false"
+        )
 
 
 def prepare_env_and_condition(ctx: EvaluatorContext, condition: str) -> tuple[dict, str]:

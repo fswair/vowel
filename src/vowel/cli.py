@@ -1,18 +1,25 @@
+import importlib.util
 import os
 import sys
 
 import dotenv
 
-if "--debug" not in sys.argv:
-    os.environ["LOGFIRE_DISABLED"] = "1"
-    os.environ["LOGFIRE_CONSOLE"] = "false"
-    os.environ["LOGFIRE_SEND_TO_LOGFIRE"] = "false"
+dotenv.load_dotenv()
+
+if "--debug" in sys.argv:
+    if importlib.util.find_spec("logfire"):
+        import logfire
+
+        logfire.configure()
+        logfire.instrument_pydantic_ai()
+    else:
+        raise ImportError(
+            "Debug mode enabled but logfire is not installed. Please install logfire or disable debug mode."
+        )
 
 from pathlib import Path
 
 import click
-
-dotenv.load_dotenv()
 
 
 @click.command()
@@ -61,27 +68,61 @@ def main(yaml_file: Path, debug: bool, filter_func: str, verbose: bool):
         if result.report:
             result.report.print(include_averages=True, include_reasons=True)
 
-    click.echo(f"\n{'='*80}")
-    click.echo(click.style("Final Summary", bold=True))
-    click.echo("=" * 80)
+    click.echo("\n")
 
-    click.echo(f"  📊 Total functions: {summary.total_count}")
-    click.echo(
-        f"  ✅ Fully passed: {click.style(str(summary.success_count), fg='green', bold=True)}"
-    )
+    try:
+        from rich import box
+        from rich.console import Console
+        from rich.table import Table
 
-    if summary.failed_count > 0:
-        click.echo(
-            f"  ⚠️  Partial failures: {click.style(str(summary.failed_count), fg='yellow', bold=True)}"
+        console = Console()
+
+        summary_table = Table(
+            title="📊 Final Summary", box=box.ROUNDED, show_header=True, header_style="bold cyan"
         )
 
-    if summary.error_count > 0:
-        click.echo(f"  ❌ Errors: {click.style(str(summary.error_count), fg='red', bold=True)}")
+        summary_table.add_column("Metric", style="cyan", no_wrap=True, width=20)
+        summary_table.add_column("Count", justify="center", width=10)
+        summary_table.add_column("Status", justify="center", width=10)
+
+        summary_table.add_row("Total Functions", str(summary.total_count), "📊")
+
+        summary_table.add_row(
+            "Fully Passed",
+            str(summary.success_count),
+            "[green]✅[/green]" if summary.success_count > 0 else "−",
+        )
+
+        if summary.failed_count > 0:
+            summary_table.add_row(
+                "Partial Failures", str(summary.failed_count), "[yellow]⚠️[/yellow]"
+            )
+
+        if summary.error_count > 0:
+            summary_table.add_row("Errors", str(summary.error_count), "[red]❌[/red]")
+
+        console.print()
+        console.print(summary_table)
+        console.print()
+
+    except ImportError:
+        click.echo(f"  📊 Total functions: {summary.total_count}")
+        click.echo(
+            f"  ✅ Fully passed: {click.style(str(summary.success_count), fg='green', bold=True)}"
+        )
+
+        if summary.failed_count > 0:
+            click.echo(
+                f"  ⚠️  Partial failures: {click.style(str(summary.failed_count), fg='yellow', bold=True)}"
+            )
+
+        if summary.error_count > 0:
+            click.echo(f"  ❌ Errors: {click.style(str(summary.error_count), fg='red', bold=True)}")
 
     if summary.failed_results:
-        click.echo(f"\n{'='*80}")
+        click.echo("\n")
         click.echo(click.style("⚠️  Functions with Failed Assertions", bold=True, fg="yellow"))
-        click.echo("=" * 80)
+        click.echo("")
 
         for result in summary.failed_results:
             click.echo(f"\n🔍 {click.style(result.eval_id, fg='cyan', bold=True)}")

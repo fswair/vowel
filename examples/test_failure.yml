@@ -1,0 +1,20 @@
+examples.functions.count_words:
+  evals:
+    IsInt:
+      type: int
+
+    NonNegative:
+      assertion: "output >= 0"
+
+  dataset:
+    - case:
+        input: "Hello world from Python code"
+        expected: 5
+
+    - case:
+        input: "This will fail"
+        expected: 999
+
+    - case:
+        input: "Single"
+        expected: 1
