@@ -42,10 +42,10 @@ dev = [
 vowel = "vowel.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/yourusername/vowel"
-Documentation = "https://github.com/yourusername/vowel#readme"
-Repository = "https://github.com/yourusername/vowel.git"
-Issues = "https://github.com/yourusername/vowel/issues"
+Homepage = "https://github.com/fswair/vowel"
+Documentation = "https://github.com/fswair/vowel#readme"
+Repository = "https://github.com/fswair/vowel.git"
+Issues = "https://github.com/fswair/vowel/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/vowel"]
