@@ -110,6 +110,20 @@ class PatternMatchCase(BaseModel):
     )
 
 
+class RaisesCase(BaseModel):
+    """Exception raising evaluation case. Validates that the function raises a specific exception."""
+
+    raises: str = Field(
+        description="Expected exception type as string (e.g., 'ValueError', 'KeyError', 'TypeError').",
+        examples=["ValueError", "TypeError", "KeyError", "ZeroDivisionError", "IndexError"],
+    )
+    match: Optional[str] = Field(
+        default=None,
+        description="Optional regex pattern to match against the exception message.",
+        examples=["invalid input", "must be positive", "not found"],
+    )
+
+
 class LLMJudgeCase(BaseModel):
     """LLM Judge evaluation case. Uses an LLM to evaluate the output based on a rubric."""
 
@@ -226,6 +240,23 @@ class MatchCase(BaseModel):
         default=True,
         description="Whether the regex pattern matching should be case-sensitive (only used if pattern is specified).",
     )
+    raises: Optional[str] = Field(
+        default=None,
+        description="Expected exception type for this case. If specified, the test expects the function to raise this exception.",
+        examples=["ValueError", "TypeError", "KeyError", "ZeroDivisionError"],
+    )
+    match: Optional[str] = Field(
+        default=None,
+        description="Optional regex pattern to match against the exception message (only used if raises is specified).",
+        examples=["invalid input", "must be positive", "not found"],
+    )
+    
+    @field_validator("match")
+    @classmethod
+    def validate_match_requires_raises(cls, v, info):
+        if v is not None and info.data.get("raises") is None:
+            raise ValueError("'match' can only be used together with 'raises'")
+        return v
 
     @field_validator("inputs")
     @classmethod
@@ -259,6 +290,10 @@ class MatchCase(BaseModel):
     @property
     def has_pattern(self) -> bool:
         return self.pattern is not None
+
+    @property
+    def has_raises(self) -> bool:
+        return self.raises is not None
 
 
 class EvalCase(BaseModel):

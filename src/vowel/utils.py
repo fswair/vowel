@@ -18,13 +18,13 @@ from pydantic_evals.reporting import EvaluationReport
 
 from .eval_types import Evals, EvalsFile
 from .evals import (AssertionEvaluator, ContainsInputEvaluator,
-                    PatternMatchingEvaluator, TypeAdapterEvaluator,
-                    create_llm_judge)
+                    PatternMatchingEvaluator, RaisesEvaluator,
+                    TypeAdapterEvaluator, create_llm_judge)
 
 sys.path.insert(0, os.getcwd())
 
 
-def unpack_inputs(func: Callable) -> Callable:
+def unpack_inputs(func: Callable, has_raises: bool = False) -> Callable:
     """
     Create a wrapper that handles both single input and multiple inputs.
     Supports both sync and async functions.
@@ -35,36 +35,61 @@ def unpack_inputs(func: Callable) -> Callable:
 
     Args:
         func: The function to wrap (sync or async)
+        has_raises: If True, catches exceptions and returns them for validation
 
     Returns:
         Wrapped function that accepts dict with 'input' or 'inputs' key
     """
     is_async = inspect.iscoroutinefunction(func)
 
-    if is_async:
-
-        @wraps(func)
-        async def async_wrapper(arg_dict):
-            if isinstance(arg_dict, dict):
-                if "inputs" in arg_dict:
-                    return await func(*arg_dict["inputs"])
-                elif "input" in arg_dict:
-                    return await func(arg_dict["input"])
-            return await func(arg_dict)
-
-        return async_wrapper
+    if has_raises:
+        if is_async:
+            @wraps(func)
+            async def async_wrapper(arg_dict):
+                try:
+                    if isinstance(arg_dict, dict):
+                        if "inputs" in arg_dict:
+                            return await func(*arg_dict["inputs"])
+                        elif "input" in arg_dict:
+                            return await func(arg_dict["input"])
+                    return await func(arg_dict)
+                except Exception as e:
+                    return {"_exception": e, "_exception_type": type(e).__name__}
+            return async_wrapper
+        else:
+            @wraps(func)
+            def sync_wrapper(arg_dict):
+                try:
+                    if isinstance(arg_dict, dict):
+                        if "inputs" in arg_dict:
+                            return func(*arg_dict["inputs"])
+                        elif "input" in arg_dict:
+                            return func(arg_dict["input"])
+                    return func(arg_dict)
+                except Exception as e:
+                    return {"_exception": e, "_exception_type": type(e).__name__}
+            return sync_wrapper
     else:
-
-        @wraps(func)
-        def sync_wrapper(arg_dict):
-            if isinstance(arg_dict, dict):
-                if "inputs" in arg_dict:
-                    return func(*arg_dict["inputs"])
-                elif "input" in arg_dict:
-                    return func(arg_dict["input"])
-            return func(arg_dict)
-
-        return sync_wrapper
+        if is_async:
+            @wraps(func)
+            async def async_wrapper(arg_dict):
+                if isinstance(arg_dict, dict):
+                    if "inputs" in arg_dict:
+                        return await func(*arg_dict["inputs"])
+                    elif "input" in arg_dict:
+                        return await func(arg_dict["input"])
+                return await func(arg_dict)
+            return async_wrapper
+        else:
+            @wraps(func)
+            def sync_wrapper(arg_dict):
+                if isinstance(arg_dict, dict):
+                    if "inputs" in arg_dict:
+                        return func(*arg_dict["inputs"])
+                    elif "input" in arg_dict:
+                        return func(arg_dict["input"])
+                return func(arg_dict)
+            return sync_wrapper
 
 
 def import_function(module_path: str) -> Callable:
@@ -241,8 +266,24 @@ def to_dataset(evals: Evals, *, name: str) -> Dataset:
                 )
             )
 
+        if match_case.has_raises:
+            case_evaluators.append(
+                RaisesEvaluator(
+                    expected_exception_type=match_case.raises,
+                    expected_exception_match=match_case.match,
+                    evaluation_name=f"Raises: {match_case.raises}",
+                )
+            )
+
         if not case_evaluators:
             case_evaluators = []
+
+        case_metadata = {}
+        if match_case.has_raises:
+            case_metadata["_expects_exception"] = True
+            case_metadata["_exception_type"] = match_case.raises
+            if match_case.match:
+                case_metadata["_exception_match"] = match_case.match
 
         if match_case.inputs is not None:
             display_input = f"inputs: {match_case.inputs}"
@@ -261,6 +302,7 @@ def to_dataset(evals: Evals, *, name: str) -> Dataset:
                 inputs=input_value,
                 expected_output=match_case.expected,
                 evaluators=case_evaluators,
+                metadata=case_metadata if case_metadata else None,
             )
         )
 
@@ -553,7 +595,13 @@ def run_evals(
 
         try:
             dataset = to_dataset(name=eval_id, evals=evals)
-            wrapped_func = unpack_inputs(func)
+            
+            has_any_raises = any(
+                case.metadata and case.metadata.get("_expects_exception")
+                for case in dataset.cases
+            )
+            
+            wrapped_func = unpack_inputs(func, has_raises=has_any_raises)
 
             if inspect.iscoroutinefunction(wrapped_func):
                 report = asyncio.run(dataset.evaluate(wrapped_func))

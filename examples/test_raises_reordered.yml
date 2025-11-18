@@ -1,0 +1,20 @@
+examples.functions.calculate_discount:
+  evals:
+    IsFloat:
+      type: float
+  dataset:
+    - case:
+        id: "invalid_discount_raises"
+        inputs: [100.0, 150.0]
+        raises: ValueError
+
+    - case:
+        id: "negative_price_raises"
+        inputs: [-100.0, 20.0]
+        raises: ValueError
+        match: "must be positive"
+
+    - case:
+        id: "valid_discount"
+        inputs: [100.0, 20.0]
+        expected: 80.0

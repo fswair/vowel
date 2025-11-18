@@ -582,7 +582,150 @@ pattern: "^prefix"
 pattern: "suffix$"
 ```
 
-### 8. LLM Judge Evaluator
+### 8. Raises Evaluator (Exception Testing)
+
+Tests that a function raises a specific exception. Similar to pytest's `pytest.raises`, this evaluator verifies both the exception type and optionally the exception message pattern. This is a **case-level only** evaluator.
+
+```yaml
+function_name:
+  dataset:
+    - case:
+        input: invalid_value
+        raises: ExceptionType # Required: exception type name
+        match: "pattern" # Optional: regex pattern for exception message
+```
+
+**Important Notes:**
+
+- `raises` is **case-level only** - cannot be used as a global evaluator
+- `match` can only be used together with `raises`
+- When `raises` is specified, the test expects an exception and will fail if the function returns normally
+- Global evaluators (type checks, assertions, etc.) are automatically skipped for exception cases
+
+**Examples:**
+
+```yaml
+# Basic exception testing
+calculate_discount:
+  evals:
+    IsFloat:
+      type: float
+  dataset:
+    - case:
+        id: "valid_calculation"
+        inputs: [100.0, 20.0]
+        expected: 80.0
+
+    - case:
+        id: "negative_price"
+        inputs: [-100.0, 20.0]
+        raises: ValueError
+        match: "must be positive" # Checks exception message
+
+    - case:
+        id: "invalid_discount"
+        inputs: [100.0, 150.0]
+        raises: ValueError # Just checks type, not message
+
+# Division by zero
+divide:
+  evals:
+    IsNumber:
+      type: "int | float"
+  dataset:
+    - case:
+        inputs: [10, 2]
+        expected: 5.0
+
+    - case:
+        inputs: [10, 0]
+        raises: ZeroDivisionError
+
+# Type validation
+parse_age:
+  dataset:
+    - case:
+        input: "25"
+        expected: 25
+
+    - case:
+        input: "invalid"
+        raises: ValueError
+        match: "invalid literal"
+
+    - case:
+        input: -5
+        raises: ValueError
+        match: "age must be positive"
+
+# Key errors
+get_config_value:
+  dataset:
+    - case:
+        input: "api_key"
+        expected: "secret_key_123"
+
+    - case:
+        input: "nonexistent_key"
+        raises: KeyError
+        match: "nonexistent_key"
+
+# Multiple exception types
+process_data:
+  dataset:
+    - case:
+        input: { "valid": "data" }
+        expected: "processed"
+
+    - case:
+        input: null
+        raises: TypeError
+        match: "NoneType"
+
+    - case:
+        input: []
+        raises: ValueError
+        match: "empty"
+
+    - case:
+        input: { "invalid": "format" }
+        raises: KeyError
+
+# Index errors
+get_element:
+  dataset:
+    - case:
+        inputs: [[1, 2, 3], 1]
+        expected: 2
+
+    - case:
+        inputs: [[1, 2, 3], 10]
+        raises: IndexError
+        match: "out of range"
+```
+
+**How it works:**
+
+1. When `raises` is present in a case, the framework wraps the function execution in a try-catch
+2. If an exception is raised:
+   - Checks if exception type matches `raises`
+   - If `match` is provided, validates exception message against the regex pattern
+   - Global evaluators are skipped (they would fail on exception dict)
+3. If no exception is raised when `raises` is specified, the test fails
+4. If exception type doesn't match, the test fails and shows actual vs expected
+
+**Common Exception Types:**
+
+- `ValueError`: Invalid value/argument
+- `TypeError`: Wrong type
+- `KeyError`: Missing dictionary key
+- `IndexError`: List/array index out of range
+- `ZeroDivisionError`: Division by zero
+- `AttributeError`: Missing attribute
+- `FileNotFoundError`: File doesn't exist
+- `RuntimeError`: Generic runtime error
+
+### 9. LLM Judge Evaluator
 
 Uses a Language Model to evaluate outputs based on a custom rubric. Ideal for semantic evaluation, quality assessment, and cases where rule-based checking is insufficient.
 
