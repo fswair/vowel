@@ -7,8 +7,7 @@ from dataclasses import dataclass
 import dotenv
 from pydantic.type_adapter import TypeAdapter
 from pydantic_ai.settings import ModelSettings
-from pydantic_evals.evaluators import (EvaluationReason, Evaluator,
-                                       EvaluatorContext, LLMJudge)
+from pydantic_evals.evaluators import EvaluationReason, Evaluator, EvaluatorContext, LLMJudge
 
 dotenv.load_dotenv()
 
@@ -55,13 +54,14 @@ class AssertionEvaluator(Evaluator):
 
     def __init__(self, condition: str, *, evaluation_name: str = "Assertion"):
         self.condition = condition
-        self.assertion = f"assert {condition}"
         self.evaluation_name = evaluation_name
 
     def evaluate(self, ctx: EvaluatorContext) -> bool:
+        if isinstance(ctx.output, dict) and "_exception" in ctx.output:
+            return EvaluationReason(value=True, reason="Skipped (exception case)")
         env, condition = prepare_env_and_condition(ctx, self.condition)
         try:
-            exec(self.assertion, env, env)
+            assert eval(self.condition, env, env)
             return EvaluationReason(
                 value=True, reason=f"Assertion passed for condition: {condition}"
             )
@@ -79,6 +79,8 @@ class TypeAdapterEvaluator(Evaluator):
     strict: bool | None = None
 
     def evaluate(self, ctx: EvaluatorContext) -> bool:
+        if isinstance(ctx.output, dict) and "_exception" in ctx.output:
+            return EvaluationReason(value=True, reason="Skipped (exception case)")
         type_env = {"typing": typing}
         expected_type = eval(self.type, type_env, type_env)
         ta = TypeAdapter(expected_type)
@@ -97,6 +99,8 @@ class ContainsInputEvaluator(Evaluator):
     as_strings: bool = False
 
     def evaluate(self, ctx: EvaluatorContext) -> EvaluationReason:
+        if isinstance(ctx.output, dict) and "_exception" in ctx.output:
+            return EvaluationReason(value=True, reason="Skipped (exception case)")
         input_value = ctx.inputs
         if isinstance(ctx.inputs, dict):
             if "input" in ctx.inputs:
@@ -151,7 +155,8 @@ class PatternMatchingEvaluator(Evaluator):
     case_sensitive: bool = True
 
     def evaluate(self, ctx: EvaluatorContext) -> EvaluationReason:
-
+        if isinstance(ctx.output, dict) and "_exception" in ctx.output:
+            return EvaluationReason(value=True, reason="Skipped (exception case)")
         flags = 0 if self.case_sensitive else re.IGNORECASE
         output_str = str(ctx.output)
 
@@ -167,6 +172,41 @@ class PatternMatchingEvaluator(Evaluator):
             )
 
 
+@dataclass
+class RaisesEvaluator(Evaluator):
+    """Evaluator for checking if function raised expected exception."""
+
+    expected_exception_type: str
+    expected_exception_match: str | None = None
+    evaluation_name: str = "Raises"
+
+    def evaluate(self, ctx: EvaluatorContext) -> EvaluationReason:
+        output = ctx.output
+        if not isinstance(output, dict) or "_exception" not in output:
+            return EvaluationReason(
+                value=False,
+                reason=f"Expected {self.expected_exception_type} to be raised, but function returned normally with output: {output!r}",
+            )
+        actual_exception = output["_exception"]
+        actual_type = output["_exception_type"]
+        if actual_type != self.expected_exception_type:
+            return EvaluationReason(
+                value=False,
+                reason=f"Expected {self.expected_exception_type}, but got {actual_type}: {actual_exception}",
+            )
+        if self.expected_exception_match:
+            exception_message = str(actual_exception)
+            if not re.search(self.expected_exception_match, exception_message):
+                return EvaluationReason(
+                    value=False,
+                    reason=f"Exception type matches ({actual_type}), but message doesn't match pattern {self.expected_exception_match!r}. Message: {exception_message}",
+                )
+        reason = f"Correctly raised {actual_type}"
+        if self.expected_exception_match:
+            reason += f" with message matching pattern {self.expected_exception_match!r}"
+        return EvaluationReason(value=True, reason=reason)
+
+
 def create_llm_judge(
     rubric: str,
     include: list[str] | None = None,
@@ -180,6 +220,14 @@ def create_llm_judge(
         raise ValueError(
             "'model' must be specified in config or set JUDGE_MODEL environment variable"
         )
+
+    if model.strip().startswith("$"):
+        env_var = model.strip().lstrip("$")
+        model = os.getenv(env_var)
+        if not model:
+            raise ValueError(
+                f"Environment variable {env_var} is not set for judge model, set {env_var} to a valid model name."
+            )
 
     include_input = False
     include_expected_output = False

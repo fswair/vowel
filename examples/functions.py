@@ -21,7 +21,9 @@ def validate_email(email: str) -> bool:
     return bool(re.match(pattern, email))
 
 
-def calculate_discount(price: float, discount_percent: float) -> float:
+async def calculate_discount(price: float, discount_percent: float) -> float:
+    if price < 0:
+        raise ValueError("Price must be positive")
     if discount_percent < 0 or discount_percent > 100:
         raise ValueError("Discount must be between 0 and 100")
     return round(price * (1 - discount_percent / 100), 2)
@@ -152,3 +154,18 @@ def explain_math_concept(concept: str) -> str:
         return result.output
 
     return asyncio.run(_run())
+
+
+def binary_search(sorted_list: list[int], target: int) -> int:
+    """Binary search for target in sorted_list (ascending). Returns index or -1 if not found."""
+    low = 0
+    high = len(sorted_list) - 1
+    while low <= high:
+        mid = low + (high - low) // 2
+        if sorted_list[mid] == target:
+            return mid
+        elif sorted_list[mid] < target:
+            low = mid + 1
+        else:
+            high = mid - 1
+    return -1

@@ -1,25 +1,9 @@
-import importlib.util
-import os
-import sys
-
+import click
 import dotenv
-
-dotenv.load_dotenv()
-
-if "--debug" in sys.argv:
-    if importlib.util.find_spec("logfire"):
-        import logfire
-
-        logfire.configure()
-        logfire.instrument_pydantic_ai()
-    else:
-        raise ImportError(
-            "Debug mode enabled but logfire is not installed. Please install logfire or disable debug mode."
-        )
 
 from pathlib import Path
 
-import click
+dotenv.load_dotenv()
 
 
 @click.command()
