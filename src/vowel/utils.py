@@ -1,25 +1,31 @@
 import asyncio
 import builtins
 import importlib
+import importlib.util
 import inspect
 import os
 import sys
 from datetime import timedelta
 from functools import wraps
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import click
 import yaml
+from pydantic import BaseModel, Field
 from pydantic_evals import Case, Dataset
-from pydantic_evals.evaluators import (Contains, EqualsExpected, Evaluator,
-                                       MaxDuration)
+from pydantic_evals.evaluators import Contains, EqualsExpected, Evaluator, MaxDuration
 from pydantic_evals.reporting import EvaluationReport
 
 from .eval_types import Evals, EvalsFile
-from .evals import (AssertionEvaluator, ContainsInputEvaluator,
-                    PatternMatchingEvaluator, RaisesEvaluator,
-                    TypeAdapterEvaluator, create_llm_judge)
+from .evals import (
+    AssertionEvaluator,
+    ContainsInputEvaluator,
+    PatternMatchingEvaluator,
+    RaisesEvaluator,
+    TypeAdapterEvaluator,
+    create_llm_judge,
+)
 
 sys.path.insert(0, os.getcwd())
 
@@ -42,59 +48,49 @@ def unpack_inputs(func: Callable, has_raises: bool = False) -> Callable:
     """
     is_async = inspect.iscoroutinefunction(func)
 
-    if has_raises:
-        if is_async:
-            @wraps(func)
-            async def async_wrapper(arg_dict):
-                try:
-                    if isinstance(arg_dict, dict):
-                        if "inputs" in arg_dict:
-                            return await func(*arg_dict["inputs"])
-                        elif "input" in arg_dict:
-                            return await func(arg_dict["input"])
-                    return await func(arg_dict)
-                except Exception as e:
+    def _call_func(f, arg_dict):
+        """Helper to call function with proper argument unpacking."""
+        if not isinstance(arg_dict, dict):
+            return f(arg_dict)
+
+        if "inputs" in arg_dict:
+            inputs = arg_dict["inputs"]
+            return f(**inputs) if isinstance(inputs, dict) else f(*inputs)
+        elif "input" in arg_dict:
+            return f(arg_dict["input"])
+
+        return f(arg_dict)
+
+    if is_async:
+
+        @wraps(func)
+        async def wrapper(arg_dict):
+            try:
+                return await _call_func(func, arg_dict)
+            except Exception as e:
+                if has_raises:
                     return {"_exception": e, "_exception_type": type(e).__name__}
-            return async_wrapper
-        else:
-            @wraps(func)
-            def sync_wrapper(arg_dict):
-                try:
-                    if isinstance(arg_dict, dict):
-                        if "inputs" in arg_dict:
-                            return func(*arg_dict["inputs"])
-                        elif "input" in arg_dict:
-                            return func(arg_dict["input"])
-                    return func(arg_dict)
-                except Exception as e:
-                    return {"_exception": e, "_exception_type": type(e).__name__}
-            return sync_wrapper
+                raise
+
+        return wrapper
     else:
-        if is_async:
-            @wraps(func)
-            async def async_wrapper(arg_dict):
-                if isinstance(arg_dict, dict):
-                    if "inputs" in arg_dict:
-                        return await func(*arg_dict["inputs"])
-                    elif "input" in arg_dict:
-                        return await func(arg_dict["input"])
-                return await func(arg_dict)
-            return async_wrapper
-        else:
-            @wraps(func)
-            def sync_wrapper(arg_dict):
-                if isinstance(arg_dict, dict):
-                    if "inputs" in arg_dict:
-                        return func(*arg_dict["inputs"])
-                    elif "input" in arg_dict:
-                        return func(arg_dict["input"])
-                return func(arg_dict)
-            return sync_wrapper
+
+        @wraps(func)
+        def wrapper(arg_dict):
+            try:
+                return _call_func(func, arg_dict)
+            except Exception as e:
+                if has_raises:
+                    return {"_exception": e, "_exception_type": type(e).__name__}
+                raise
+
+        return wrapper
 
 
 def import_function(module_path: str) -> Callable:
     """
     Import a function from a module path.
+    Handles standard imports and file-based imports (when shadowing occurs).
 
     Args:
         module_path: Full module path like 'module.submodule.function', builtin name like 'len',
@@ -107,44 +103,58 @@ def import_function(module_path: str) -> Callable:
         ImportError: If the module cannot be imported
         AttributeError: If the function is not found in the module
     """
-
     if "." not in module_path:
         try:
-
-            func = getattr(builtins, module_path, None)
-            if func is not None:
-                return func
+            return getattr(builtins, module_path)
         except AttributeError:
-            pass
-
-        raise ImportError(
-            f"Function '{module_path}' not found in builtins. "
-            f"Use full module path like 'module.function' or pass the function directly via the 'functions' parameter."
-        )
+            raise ImportError(
+                f"Function '{module_path}' not found in builtins. "
+                f"Use full module path like 'module.function' or pass the function directly."
+            )
 
     parts = module_path.split(".")
-    func_name = parts[-1]
-    module_name = ".".join(parts[:-1])
+
+    for i in range(len(parts) - 1, 0, -1):
+        module_name = ".".join(parts[:i])
+        remaining_parts = parts[i:]
+
+        module = None
+
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError:
+            relative_path = module_name.replace(".", os.sep) + ".py"
+            file_path = os.path.join(os.getcwd(), relative_path)
+
+            if os.path.exists(file_path):
+                try:
+                    spec = importlib.util.spec_from_file_location(module_name, file_path)
+                    if spec and spec.loader:
+                        module = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(module)
+                except Exception:
+                    pass
+
+        if module:
+            try:
+                obj = module
+                for part in remaining_parts:
+                    obj = getattr(obj, part)
+                return obj
+            except AttributeError:
+                continue
 
     try:
-        module = importlib.import_module(module_name)
-        func = getattr(module, func_name)
-        return func
-
-    except ImportError as e:
-
-        builtin_obj = getattr(builtins, parts[0], None)
-        if builtin_obj is not None:
-            try:
-
-                func = getattr(builtin_obj, func_name)
-                return func
-            except AttributeError:
-                pass
-
-        raise ImportError(f"Cannot import module '{module_name}': {e}")
+        obj = getattr(builtins, parts[0])
+        for part in parts[1:]:
+            obj = getattr(obj, part)
+        return obj
     except AttributeError:
-        raise AttributeError(f"Module '{module_name}' has no function '{func_name}'")
+        pass
+
+    raise ImportError(
+        f"Cannot import '{module_path}'. Tried all possible module/attribute combinations."
+    )
 
 
 def load_evals_file(yaml_path: str) -> Dict[str, Evals]:
@@ -309,22 +319,31 @@ def to_dataset(evals: Evals, *, name: str) -> Dataset:
     return Dataset(name=name, cases=dataset_cases, evaluators=global_evaluators)
 
 
-class EvalResult:
+class EvalResult(BaseModel):
+    eval_id: str
+    report: Optional[EvaluationReport] = None
+    error: Optional[str] = None
+    success: bool = Field(default=False)
+
+    class Config:
+        arbitrary_types_allowed = True
+
     def __init__(
         self,
         eval_id: str,
         report: Optional[EvaluationReport] = None,
         error: Optional[Exception] = None,
+        **data,
     ):
-        self.eval_id = eval_id
-        self.report = report
-        self.error = error
-        self.success = error is None and not self.has_failures()
+        error_str = str(error) if error else None
+        success = error is None and not self._check_failures(report)
+        super().__init__(eval_id=eval_id, report=report, error=error_str, success=success, **data)
 
-    def has_failures(self) -> bool:
-        if self.report is None:
+    @staticmethod
+    def _check_failures(report: Optional[EvaluationReport]) -> bool:
+        if report is None:
             return False
-        for case in self.report.cases:
+        for case in report.cases:
             if hasattr(case, "error") and case.error is not None:
                 return True
             for assertion in case.assertions.values():
@@ -334,14 +353,35 @@ class EvalResult:
                     return True
         return False
 
+    def has_failures(self) -> bool:
+        return self._check_failures(self.report)
 
-class EvalSummary:
-    def __init__(self, results: List[EvalResult]):
-        self.results = results
-        self.success_count = sum(1 for r in results if r.success and r.report)
-        self.failed_count = sum(1 for r in results if r.report and r.has_failures())
-        self.error_count = sum(1 for r in results if r.error is not None)
-        self.total_count = len(results)
+
+class EvalSummary(BaseModel):
+    results: List[EvalResult]
+    success_count: int = Field(default=0)
+    failed_count: int = Field(default=0)
+    error_count: int = Field(default=0)
+    total_count: int = Field(default=0)
+
+    func: Optional[Any] = None
+
+    class Config:
+        arbitrary_types_allowed = True
+
+    def __init__(self, results: List[EvalResult], **data):
+        success_count = sum(1 for r in results if r.success and r.report)
+        failed_count = sum(1 for r in results if r.report and r.has_failures())
+        error_count = sum(1 for r in results if r.error is not None)
+        total_count = len(results)
+        super().__init__(
+            results=results,
+            success_count=success_count,
+            failed_count=failed_count,
+            error_count=error_count,
+            total_count=total_count,
+            **data,
+        )
 
     @property
     def all_passed(self) -> bool:
@@ -488,7 +528,7 @@ class EvalSummary:
         Returns:
             dict
         """
-        output = {
+        result_dict = {
             "summary": {
                 "total_functions": self.total_count,
                 "passed": self.success_count,
@@ -506,8 +546,8 @@ class EvalSummary:
             }
 
             if result.error:
-                result_data["error"] = str(result.error)
-                result_data["error_type"] = type(result.error).__name__
+                result_data["error"] = result.error
+                result_data["error_type"] = "Error"
 
             if result.report:
                 result_data["cases"] = []
@@ -516,11 +556,18 @@ class EvalSummary:
 
                     case_passed = all(assertion.value for assertion in case.assertions.values())
 
+                    case_output = case.output
+                    if isinstance(case_output, dict) and "_exception" in case_output:
+                        case_output = {
+                            "_exception_type": case_output.get("_exception_type"),
+                            "_exception_message": str(case_output.get("_exception")),
+                        }
+
                     case_data = {
                         "case_id": case.name,
                         "status": "passed" if case_passed else "failed",
                         "input": case.inputs,
-                        "output": case.output,
+                        "output": case_output,
                         "expected_output": case.expected_output,
                         "duration_ms": (
                             round(case.total_duration * 1000, 2)
@@ -543,9 +590,9 @@ class EvalSummary:
 
                     result_data["cases"].append(case_data)
 
-            output["results"].append(result_data)
+            result_dict["results"].append(result_data)
 
-        return output
+        return result_dict
 
 
 def run_evals(
@@ -595,12 +642,11 @@ def run_evals(
 
         try:
             dataset = to_dataset(name=eval_id, evals=evals)
-            
+
             has_any_raises = any(
-                case.metadata and case.metadata.get("_expects_exception")
-                for case in dataset.cases
+                case.metadata and case.metadata.get("_expects_exception") for case in dataset.cases
             )
-            
+
             wrapped_func = unpack_inputs(func, has_raises=has_any_raises)
 
             if inspect.iscoroutinefunction(wrapped_func):

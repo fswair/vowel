@@ -2,13 +2,96 @@
 RunEvals - A fluent API for running evaluations
 """
 
+import os
 import ast
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence, Union
+from typing import (
+    Any,
+    TypeVar,
+    Callable,
+    Dict,
+    Generic,
+    List,
+    Optional,
+    Sequence,
+    Union,
+    cast,
+)
+from pydantic import BaseModel, Field
 
 from .eval_types import Evals, EvalsFile
 from .utils import EvalSummary
 from .utils import run_evals as _run_evals
+
+_RT = TypeVar("_RT", bound=Any)
+
+
+class Function(BaseModel, Generic[_RT]):
+    name: str = Field(description="The name of the function to generate evals for.")
+    description: str = Field(description="A brief description of the function's purpose.")
+    code: str = Field(description="The complete implementation code of the function.")
+    file_path: Optional[str] = Field(
+        description="The file path where the function is defined, if applicable.",
+        examples=["/path/to/module.py"],
+    )
+
+    func: Optional[Any] = Field(
+        default=None, exclude=True, description="The actual function implementation as a callable."
+    )
+
+    @property
+    def __name__(self) -> str:
+        return self.name
+
+    @property
+    def impl(self) -> Callable:
+        """
+        Get the function implementation as a callable.
+
+        Returns:
+            Callable: The function implementation.
+        """
+        if not self.func:
+            self.execute()
+        return cast(Callable, self.func)
+
+    def execute(self):
+        local_scope = {}
+        try:
+            exec(self.code, local_scope, local_scope)
+        except Exception as e:
+            raise e from RuntimeError(f"Error executing code for function '{self.name}'.")
+
+        self.func = local_scope[self.name]
+
+    def __call__(self, *args, **kwargs) -> _RT:
+        """
+        Call the function implementation with the provided arguments.
+        Args:
+            *args: Positional arguments for the function.
+            **kwargs: Keyword arguments for the function.
+        Returns:
+            _RT: The return value of the function.
+        """
+        return self.impl(*args, **kwargs)
+
+    @property
+    def func_path(self) -> str:
+        if self.file_path:
+
+            file_path = Path(self.file_path).resolve()
+            current_dir = Path(os.getcwd()).resolve()
+
+            try:
+                relative_path = file_path.relative_to(current_dir)
+
+                module_path = relative_path.with_suffix("")
+                module_path_str = ".".join(module_path.parts)
+
+                return f"{module_path_str}.{self.name}"
+            except ValueError:
+                return f"{file_path.stem}.{self.name}"
+        return self.name
 
 
 class RunEvals:

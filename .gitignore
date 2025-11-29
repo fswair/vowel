@@ -31,7 +31,9 @@ env/
 src/vowel/ai.py
 AGENT_*.md
 tests/
+functions/
 eval_gen.py
+demo.txt
 
 # IDE
 .vscode/

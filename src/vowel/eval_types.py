@@ -197,7 +197,7 @@ class MatchCase(BaseModel):
         ),
         examples=[5, "hello", [1, 2, 3], {"x": 10, "y": 20}, {"name": "test", "value": 42}],
     )
-    inputs: Optional[list[Any]] = Field(
+    inputs: Optional[list | dict] = Field(
         default=None,
         description=(
             "Multiple input values to pass to the function as separate arguments (*args). "
@@ -250,7 +250,7 @@ class MatchCase(BaseModel):
         description="Optional regex pattern to match against the exception message (only used if raises is specified).",
         examples=["invalid input", "must be positive", "not found"],
     )
-    
+
     @field_validator("match")
     @classmethod
     def validate_match_requires_raises(cls, v, info):
