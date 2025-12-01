@@ -64,3 +64,4 @@ yedekler/
 build/
 dist/
 *.egg-info/
+examples/test_ci.yml
