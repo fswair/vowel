@@ -1,26 +1,30 @@
+import sys
 import click
 import dotenv
 
 from pathlib import Path
+from .utils import run_evals
+
 
 dotenv.load_dotenv()
 
 
 @click.command()
 @click.argument("yaml_file", type=click.Path(exists=True, path_type=Path))
-@click.option("--debug", is_flag=True, help="Enable debug mode with logfire")
+@click.option("--ci", is_flag=True, help="Enable CI mode for Actions")
+@click.option("--coverage", help="Coverage percent for evaluations", default=100)
+@click.option("--debug", "-d", is_flag=True, help="Enable debug mode")
 @click.option(
     "--filter", "-f", "filter_func", help="Only run specific function(s) (comma-separated)"
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output including reasons")
-def main(yaml_file: Path, debug: bool, filter_func: str, verbose: bool):
-    from .utils import import_function, run_evals
+def main(yaml_file: Path, debug: bool, coverage: float, filter_func: str, verbose: bool, ci: bool):
 
     filter_list = [f.strip() for f in filter_func.split(",")] if filter_func else None
 
     click.echo(f"Loaded evaluation(s) from: {click.style(yaml_file.name, fg='cyan')}")
     if debug:
-        click.secho("🐛 Debug mode enabled (logfire active)", fg="yellow")
+        click.secho("🐛 Debug mode enabled.", fg="yellow")
 
     try:
         summary = run_evals(yaml_file, filter_funcs=filter_list, debug=debug)
@@ -136,6 +140,23 @@ def main(yaml_file: Path, debug: bool, filter_func: str, verbose: bool):
                                     )
 
     click.echo()
+
+    if ci:
+        if coverage == 100 and not summary.all_passed:
+            click.secho("❌ Some evaluations failed!", fg="red", bold=True, err=True)
+            print("::error title=Evaluation Failed::Some evaluations failed.", file=sys.stderr)
+            raise SystemExit(1)
+        else:
+            for result in summary.results:
+                assertion_percent = 100 * result.report.averages().assertions
+                if result.report and assertion_percent < coverage:
+                    click.secho(
+                        f"❌ Evaluation '{result.eval_id}' failed because of  %{coverage:.1f} coverage. Actual was %{assertion_percent:.1f}",
+                        fg="red",
+                        bold=True,
+                        err=True,
+                    )
+                    raise SystemExit(1)
 
 
 if __name__ == "__main__":
