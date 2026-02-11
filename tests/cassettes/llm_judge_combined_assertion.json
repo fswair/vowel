@@ -1,0 +1,9 @@
+{
+  "2e0715e19e02551b": {
+    "rubric": "dollar sign and decimals",
+    "input_preview": "19.99",
+    "result": {
+      "passed": false
+    }
+  }
+}

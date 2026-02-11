@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=vowel-schema.json
+
+fixtures:
+  db:
+    cls: Connection # setup cls
+    kwargs:
+      db_path: users.db
+    teardown: Connection.close # teardown method
+    scope: module # scope 
+
+Connection.query:
+  fixture:
+    - db
+  evals:
+    IsDict:
+      type: dict | list | None
+  dataset:
+    - case:
+        input: "SELECT max(id) FROM users" 
+        assertion: "output and output[0] == (None,)"
+    - case:
+        input: "SELECT * FROM users"
+        expected: []

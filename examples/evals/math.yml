@@ -1,0 +1,45 @@
+# Math & numeric functions with multiple evaluator types.
+# Run: vowel run examples/evals/math.yml
+
+examples.evals.functions.fibonacci:
+  evals:
+    IsInt:
+      type: int
+  dataset:
+    - case: { input: 0, expected: 0 }
+    - case: { input: 1, expected: 1 }
+    - case: { input: 10, expected: 55 }
+    - case: { input: 20, expected: 6765 }
+    - case:
+        input: -1
+        raises: ValueError
+        match: "non-negative"
+
+examples.evals.functions.calculate_bmi:
+  evals:
+    IsFloat:
+      type: float
+    ReasonableRange:
+      assertion: "10.0 <= output <= 50.0"
+    CorrectFormula:
+      assertion: "abs(output - input[0] / (input[1] ** 2)) < 0.1"
+  dataset:
+    - case: { inputs: [70.0, 1.75], expected: 22.86 }
+    - case: { inputs: [85.0, 1.80], expected: 26.23 }
+    - case: { inputs: [60.0, 1.65], expected: 22.04 }
+    - case:
+        inputs: [0.0, 1.70]
+        raises: ValueError
+        match: "positive"
+
+examples.evals.functions.clamp:
+  evals:
+    IsInt:
+      type: int
+    WithinBounds:
+      assertion: "input[1] <= output <= input[2]"
+  dataset:
+    - case: { inputs: [5, 0, 10], expected: 5 }
+    - case: { inputs: [-5, 0, 10], expected: 0 }
+    - case: { inputs: [99, 0, 10], expected: 10 }
+    - case: { inputs: [0, 0, 0], expected: 0 }

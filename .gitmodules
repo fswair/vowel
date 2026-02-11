@@ -1,0 +1,3 @@
+[submodule "vowel-optimization"]
+	path = vowel-optimization
+	url = https://github.com/fswair/vowel-optimization.git

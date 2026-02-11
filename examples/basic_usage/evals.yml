@@ -1,0 +1,95 @@
+# Basic vowel evaluation spec
+# Each top-level key is a function name.
+# `dataset` contains test cases with inputs and expected outputs.
+
+# --- Single input parameter ---
+greet:
+  dataset:
+    - case:
+        input: "World"
+        expected: "Hello, World!"
+    - case:
+        input: "Alice"
+        expected: "Hello, Alice!"
+
+# --- Multiple named parameters (dict) ---
+add:
+  dataset:
+    - case:
+        inputs: { x: 1, y: 2 }
+        expected: 3
+    - case:
+        inputs: { x: -5, y: 5 }
+        expected: 0
+    - case:
+        inputs: { x: 100, y: 200 }
+        expected: 300
+
+# --- Multiple positional parameters (list) ---
+multiply:
+  dataset:
+    - case:
+        inputs: [3, 4]
+        expected: 12
+    - case:
+        inputs: [0, 999]
+        expected: 0
+    - case:
+        inputs: [-2, 5]
+        expected: -10
+
+# --- Testing exception raising ---
+factorial:
+  dataset:
+    - case:
+        input: 0
+        expected: 1
+    - case:
+        input: 5
+        expected: 120
+    - case:
+        input: 10
+        expected: 3628800
+    - case:
+        input: -1
+        raises: ValueError
+        match: "non-negative"
+
+# --- Boolean return values ---
+is_even:
+  dataset:
+    - case:
+        input: 4
+        expected: true
+    - case:
+        input: 7
+        expected: false
+    - case:
+        input: 0
+        expected: true
+
+# --- Built-in functions work too ---
+len:
+  dataset:
+    - case:
+        input: [1, 2, 3]
+        expected: 3
+    - case:
+        input: "hello"
+        expected: 5
+
+# --- Standard library functions (module.function) ---
+math.sqrt:
+  dataset:
+    - case:
+        input: 16
+        expected: 4.0
+    - case:
+        input: 9
+        expected: 3.0
+
+os.path.join:
+  dataset:
+    - case:
+        inputs: ["/home", "user"]
+        expected: "/home/user"

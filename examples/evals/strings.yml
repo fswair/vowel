@@ -1,0 +1,56 @@
+# String utility functions.
+# Run: vowel run examples/evals/strings.yml
+
+examples.evals.functions.is_palindrome:
+  evals:
+    IsBool:
+      type: bool
+  dataset:
+    - case: { input: "racecar", expected: true }
+    - case: { input: "hello", expected: false }
+    - case: { input: "A man a plan a canal Panama", expected: true }
+    - case: { input: "Was it a rat I saw", expected: true }
+    - case: { input: "12321", expected: true }
+    - case: { input: "", expected: true }
+
+examples.evals.functions.count_words:
+  evals:
+    IsInt:
+      type: int
+    NonNegative:
+      assertion: "output >= 0"
+  dataset:
+    - case: { input: "Hello world from Python", expected: 4 }
+    - case: { input: "Single", expected: 1 }
+    - case: { input: "", expected: 0 }
+    - case: { input: "  spaces  ", expected: 1 }
+
+examples.evals.functions.get_file_extension:
+  evals:
+    IsString:
+      type: str
+    LowercaseOnly:
+      pattern: "^[a-z0-9]*$"
+  dataset:
+    - case: { input: "document.txt", expected: "txt" }
+    - case: { input: "image.PNG", expected: "png" }
+    - case: { input: "archive.tar.gz", expected: "gz" }
+    - case: { input: "noextension", expected: "" }
+    - case: { input: "script.py", expected: "py" }
+
+examples.evals.functions.extract_hashtags:
+  evals:
+    IsList:
+      type: list
+    AllStartWithHash:
+      assertion: "all(tag.startswith('#') for tag in output) if output else True"
+  dataset:
+    - case:
+        input: "Learning #python and #coding today!"
+        expected: ["#python", "#coding"]
+    - case:
+        input: "No hashtags here"
+        expected: []
+    - case:
+        input: "#AI #ML #DL"
+        expected: ["#AI", "#ML", "#DL"]

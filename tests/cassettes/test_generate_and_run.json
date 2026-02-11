@@ -1,0 +1,11 @@
+{
+  "9fd9210e37b935fb": {
+    "prompt_preview": "generate_and_run",
+    "model": "openrouter:google/gemini-3-flash-preview",
+    "response": {
+      "yaml_spec": "double:\n  evals:\n    ReturnType:\n      type: int\n    DoubleLogic:\n      assertion: \"output == input * 2\"\n    FastExecution:\n      duration: 0.001\n  dataset:\n    - case:\n        id: positive_integer\n        input: 10\n        expected: 20\n    - case:\n        id: negative_integer\n        input: -5\n        expected: -10\n    - case:\n        id: zero_input\n        input: 0\n        expected: 0\n    - case:\n        id: large_integer\n        input: 1000000\n        expected: 2000000\n    - case:\n        id: invalid_type_string\n        input: \"5\"\n        raises: TypeError\n    - case:\n        id: null_input\n        input: null\n        raises: TypeError",
+      "was_healed": false,
+      "coverage": 0.0
+    }
+  }
+}

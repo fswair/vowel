@@ -1,0 +1,145 @@
+# Evaluators showcase
+# Demonstrates every built-in evaluator vowel provides.
+
+# ─── Type Evaluator ───────────────────────────────────────────
+# Validates the return type of the function output.
+# `strict: true` disables type promotion (e.g. int → float).
+validate_email:
+  evals:
+    BoolType:
+      type: bool
+      strict: true
+  dataset:
+    - case:
+        input: "user@example.com"
+        expected: true
+    - case:
+        input: "invalid.email"
+        expected: false
+    - case:
+        input: "@nodomain.com"
+        expected: false
+
+# ─── Assertion Evaluator ─────────────────────────────────────
+# Run arbitrary Python expressions.
+# Available variables: input, output, expected, duration.
+calculate_discount:
+  evals:
+    NonNegative:
+      assertion: "output >= 0"
+    NoMoreThanPrice:
+      assertion: "output <= input[0]"
+  dataset:
+    - case:
+        inputs: [100.0, 20.0]
+        expected: 80.0
+    - case:
+        inputs: [50.0, 50.0]
+        expected: 25.0
+    - case:
+        inputs: [200.0, 0.0]
+        expected: 200.0
+
+# ─── Pattern Evaluator (Regex) ───────────────────────────────
+# Validates that output matches a regex pattern.
+format_phone:
+  evals:
+    PhoneFormat:
+      pattern: "^\\(\\d{3}\\) \\d{3}-\\d{4}$"
+  dataset:
+    - case:
+        input: "5551234567"
+        expected: "(555) 123-4567"
+    - case:
+        input: "2129876543"
+        expected: "(212) 987-6543"
+
+# ─── Duration Evaluator (Performance) ────────────────────────
+# Ensures function completes within a time limit (seconds).
+fibonacci:
+  evals:
+    IsInt:
+      type: int
+    FastExecution:
+      duration: 0.01
+  dataset:
+    - case:
+        input: 0
+        expected: 0
+    - case:
+        input: 10
+        expected: 55
+    - case:
+        input: 20
+        expected: 6765
+
+# ─── ContainsInput Evaluator ─────────────────────────────────
+# Checks that the output contains the input value.
+extract_hashtags:
+  evals:
+    IsList:
+      type: list
+    AllStartWithHash:
+      assertion: "all(tag.startswith('#') for tag in output) if output else True"
+  dataset:
+    - case:
+        input: "Learning #python and #coding today!"
+        expected:
+          - "#python"
+          - "#coding"
+    - case:
+        input: "No hashtags here"
+        expected: []
+
+# ─── Multiple Evaluators + Pattern ───────────────────────────
+# Combine evaluators for thorough validation.
+classify_age_group:
+  evals:
+    IsString:
+      type: str
+    ValidCategory:
+      pattern: "^(child|teenager|adult|senior)$"
+    LogicalRanges:
+      assertion: |
+        (input < 13 and output == 'child') or\
+        (13 <= input < 18 and output == 'teenager') or\
+        (18 <= input < 65 and output == 'adult') or\
+        (input >= 65 and output == 'senior')
+  dataset:
+    - case: { input: 5, expected: "child" }
+    - case: { input: 15, expected: "teenager" }
+    - case: { input: 30, expected: "adult" }
+    - case: { input: 70, expected: "senior" }
+    - case: { input: 12, expected: "child" }
+    - case: { input: 18, expected: "adult" }
+
+# ─── Raises (Exception Testing) ──────────────────────────────
+# Verify that specific exceptions are raised with optional message matching.
+calculate_bmi:
+  evals:
+    IsFloat:
+      type: float
+    ReasonableRange:
+      assertion: "10.0 <= output <= 50.0"
+    CorrectFormula:
+      assertion: "abs(output - input[0] / (input[1] ** 2)) < 0.1"
+  dataset:
+    - case:
+        inputs: [70.0, 1.75]
+        expected: 22.86
+    - case:
+        inputs: [85.0, 1.80]
+        expected: 26.23
+    - case:
+        inputs: [0.0, 1.70]
+        raises: ValueError
+        match: "positive"
+
+# ─── Case-level duration ─────────────────────────────────────
+# You can also set duration per case (in milliseconds).
+# calculate_discount:
+#   dataset:
+#     - case:
+#         inputs: [100, 10]
+#         expected: 90.0
+#         duration: 50   # max 50ms for this case

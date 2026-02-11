@@ -1,0 +1,9 @@
+{
+  "469213fadb237e4d": {
+    "rubric": "reasonable word count",
+    "input_preview": "This is a test. This is a test. This is a test. This is a test. This is a test. This is a test. This",
+    "result": {
+      "passed": false
+    }
+  }
+}

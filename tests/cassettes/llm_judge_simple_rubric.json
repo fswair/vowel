@@ -1,0 +1,10 @@
+{
+  "58d7842a65d640c1": {
+    "rubric": "Output should be a polite greeting",
+    "input_preview": "World",
+    "result": {
+      "passed": true,
+      "coverage": 1.0
+    }
+  }
+}

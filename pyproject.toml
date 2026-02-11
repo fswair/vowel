@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vowel"
-version = "0.2.6"
+version = "0.3.0-beta"
 description = "A modular evaluation framework for testing functions with YAML-based specifications"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -25,19 +25,37 @@ classifiers = [
 ]
 
 dependencies = [
-    "click",
-    "dotenv",
-    "pyyaml",
+    "watchdog",
+    "click>=8.0.0",
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0.0",
     "pydantic>=2.0.0",
     "pydantic-ai>=1.0.0",
     "pydantic-evals>=1.0.0",
+    "rich",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
     "black>=23.0.0",
     "ruff>=0.1.0",
+    "mypy>=1.0.0",
+    "types-pyyaml",
+]
+mcp = [
+    "mcp",
+]
+logfire = [
+    "logfire",
+]
+optimize = [
+    "vowel-optimization"
+]
+all = [
+    "vowel[optimize,dev,mcp,logfire]",
 ]
 
 [project.scripts]
@@ -59,13 +77,43 @@ target-version = ["py311"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-select = ["E", "F", "I", "N", "W"]
-ignore = []
 
-[tool.ruff.per-file-ignores]
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes
+    "I",      # isort
+    "N",      # pep8-naming
+    "W",      # pycodestyle warnings
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "SIM",    # flake8-simplify
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "B008",   # function call in default argument
+]
+
+[tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+
+[tool.ty]
+[tool.ty.environment]
+python-version = "3.11"
+
+[tool.ty.rules]
+unresolved-import = "ignore"
+
 [tool.pytest.ini_options]
+asyncio_mode = "auto"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
@@ -81,4 +129,5 @@ markers = [
     "api: tests for RunEvals API variants",
     "evaluators: tests for specific evaluator types",
     "integration: integration tests",
+    "llm: tests that require LLM API calls",
 ]

@@ -1,0 +1,9 @@
+{
+  "579cb47f48502ff3": {
+    "rubric": "not empty",
+    "input_preview": "test",
+    "result": {
+      "passed": false
+    }
+  }
+}

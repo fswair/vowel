@@ -1,0 +1,403 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "fixtures": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/FixtureDefinition"
+      },
+      "title": "Fixtures",
+      "description": "Dictionary of fixture definitions. Each key is the fixture name."
+    }
+  },
+  "additionalProperties": {
+    "$ref": "#/$defs/Evals"
+  },
+  "$defs": {
+    "AssertionCase": {
+      "description": "Custom assertion evaluation case.\n\nRuns Python expression with 'input' and 'output' variables.",
+      "properties": {
+        "assertion": {
+          "description": "Python expression that returns boolean. Must evaluate to True for test to pass.\n\nAvailable variables in assertion context:\n  - input: The input value(s) passed to the function\n    - Single param: input = value\n    - Multi param (list): input = [val1, val2, ...]\n    - Multi param (dict): input = {key: val, ...}\n  - output: The actual output returned by the function\n  - expected: The expected output value from test case (if provided)\n  - duration: Actual execution time in seconds (float)\n  - metadata: Additional metadata dict (if provided)\n\nCommon patterns:\n  - Compare output: output > 0, output == input * 2\n  - Type checks: isinstance(output, int), type(output).__name__ == 'str'\n  - String operations: output.isupper(), len(output) > 0\n  - Collection operations: all(x > 0 for x in output), len(output) == len(input)\n  - Multi-param list: output == input[0] + input[1]\n  - Multi-param dict: output == input['x'] * input['y']\n  - Containment: output in input, 'substring' in output\n  - Performance: duration < 0.1\n  - Logic: (output and input > 0) or (not output and input <= 0)",
+          "examples": [
+            "output > 0",
+            "output == input * 2",
+            "output == input ** 2",
+            "len(output) > 0",
+            "output.isupper()",
+            "output.islower()",
+            "all(x > 0 for x in output)",
+            "len(output) <= len(input)",
+            "output in input",
+            "input in str(output)",
+            "input['x'] + input['y'] == output",
+            "output == expected",
+            "abs(output - expected) < 0.001",
+            "duration < 1.0",
+            "isinstance(output, (int, float))",
+            "output % 2 == 0",
+            "(output and input % 2 == 0) or (not output and input % 2 != 0)"
+          ],
+          "title": "Assertion",
+          "type": "string"
+        }
+      },
+      "required": ["assertion"],
+      "title": "AssertionCase",
+      "type": "object"
+    },
+    "ContainsInputCase": {
+      "description": "Input containment evaluation case. Validates that output contains the input value.",
+      "properties": {
+        "contains_input": {
+          "default": true,
+          "description": "Whether output should contain the input value.",
+          "title": "Contains Input",
+          "type": "boolean"
+        },
+        "case_sensitive": {
+          "default": true,
+          "description": "Whether string comparison should be case-sensitive.",
+          "title": "Case Sensitive",
+          "type": "boolean"
+        },
+        "as_strings": {
+          "default": false,
+          "description": "Whether to convert both input and output to strings before comparison.",
+          "title": "As Strings",
+          "type": "boolean"
+        }
+      },
+      "title": "ContainsInputCase",
+      "type": "object"
+    },
+    "DatasetCase": {
+      "description": "Wrapper for a single test case in the dataset.",
+      "properties": {
+        "case": {
+          "$ref": "#/$defs/MatchCase",
+          "description": "The test case containing input, expected output, and constraints."
+        }
+      },
+      "required": ["case"],
+      "title": "DatasetCase",
+      "type": "object"
+    },
+    "DurationCase": {
+      "description": "Performance evaluation case. Validates execution time is within specified duration.",
+      "properties": {
+        "duration": {
+          "description": "Maximum allowed duration in seconds. Test fails if execution takes longer.",
+          "examples": [0.1, 1.0, 5.0, 0.001],
+          "exclusiveMinimum": 0,
+          "title": "Duration",
+          "type": "number"
+        }
+      },
+      "required": ["duration"],
+      "title": "DurationCase",
+      "type": "object"
+    },
+    "Evals": {
+      "additionalProperties": false,
+      "description": "Complete evaluation specification for a single function.\n\nThis is the main model for defining tests. It includes:\n- Function identifier\n- Global evaluation rules (type checks, assertions, etc.)\n- Test dataset with input/output pairs\n- Optional fixture dependencies",
+      "properties": {
+        "id": {
+          "description": "Function name to evaluate. Must match the actual function name.",
+          "examples": ["is_prime", "calculate_sum", "process_data", "validate_email"],
+          "title": "Id",
+          "type": "string"
+        },
+        "fixture": {
+          "description": "List of fixture names this function depends on. Fixtures must be defined in the top-level 'fixtures' section. They will be injected as keyword-only arguments to the function.",
+          "examples": [["db"], ["db", "cache"], ["redis"]],
+          "items": {
+            "type": "string"
+          },
+          "title": "Fixture",
+          "type": "array"
+        },
+        "evals": {
+          "additionalProperties": {
+            "anyOf": [
+              {"$ref": "#/$defs/IsInstanceCase"},
+              {"$ref": "#/$defs/AssertionCase"},
+              {"$ref": "#/$defs/DurationCase"},
+              {"$ref": "#/$defs/ContainsInputCase"},
+              {"$ref": "#/$defs/PatternMatchCase"},
+              {"$ref": "#/$defs/LLMJudgeCase"}
+            ]
+          },
+          "description": "Dictionary of evaluation rules that apply to ALL test cases. Each key is a descriptive name, value is the evaluation case. Use IsInstanceCase for type checks, AssertionCase for custom logic, DurationCase for performance constraints, ContainsInputCase for input containment, PatternMatchCase for regex pattern matching.",
+          "examples": [
+            {
+              "IsInteger": {"type": "int"},
+              "IsPositive": {"assertion": "output > 0"}
+            },
+            {
+              "IsUppercase": {"assertion": "output.isupper()"},
+              "NotEmpty": {"assertion": "len(output) > 0"},
+              "TypeCheck": {"type": "str"}
+            },
+            {
+              "CorrectLogic": {"assertion": "(output and input > 0) or (not output and input <= 0)"},
+              "IsBoolean": {"type": "bool"}
+            }
+          ],
+          "title": "Evals",
+          "type": "object"
+        },
+        "dataset": {
+          "description": "List of test cases. Each case has input, expected output, and optional constraints. Should cover normal cases, edge cases, and corner cases.",
+          "examples": [
+            [
+              {"case": {"expected": 4, "input": 2}},
+              {"case": {"expected": 0, "input": 0}},
+              {"case": {"expected": 9, "input": -3}}
+            ],
+            [
+              {"case": {"expected": "HELLO", "input": "hello"}},
+              {"case": {"expected": "WORLD", "input": "world"}}
+            ],
+            [
+              {"case": {"expected": 5, "input": {"x": 2, "y": 3}}},
+              {"case": {"expected": 30, "input": {"x": 10, "y": 20}}}
+            ]
+          ],
+          "items": {
+            "$ref": "#/$defs/DatasetCase"
+          },
+          "minItems": 1,
+          "title": "Dataset",
+          "type": "array"
+        }
+      },
+      "required": ["dataset"],
+      "title": "Evals",
+      "type": "object"
+    },
+    "FixtureDefinition": {
+      "description": "Definition of a single fixture with setup/teardown lifecycle.",
+      "properties": {
+        "setup": {
+          "anyOf": [{"type": "string"}, {"type": "null"}],
+          "default": null,
+          "description": "Import path to setup function (e.g., 'fixtures.create_db'). Required if 'cls' is not specified.",
+          "title": "Setup"
+        },
+        "cls": {
+          "anyOf": [{"type": "string"}, {"type": "null"}],
+          "default": null,
+          "description": "Import path to class (e.g., 'myapp.Database'). Class will be instantiated with args/kwargs.",
+          "title": "Cls"
+        },
+        "args": {
+          "description": "Positional arguments to pass to class constructor (used with 'cls')",
+          "items": {},
+          "title": "Args",
+          "type": "array"
+        },
+        "kwargs": {
+          "additionalProperties": true,
+          "description": "Keyword arguments to pass to class constructor (used with 'cls')",
+          "title": "Kwargs",
+          "type": "object"
+        },
+        "teardown": {
+          "anyOf": [{"type": "string"}, {"type": "null"}],
+          "default": null,
+          "description": "Import path to teardown function (e.g., 'fixtures.drop_db'). Can also be a class method (e.g., 'Connection.close') which will be called on the instance.",
+          "title": "Teardown"
+        },
+        "scope": {
+          "default": "function",
+          "description": "Lifecycle scope: 'function' (per case), 'module' (per eval), or 'session' (per run)",
+          "enum": ["function", "module", "session"],
+          "title": "Scope",
+          "type": "string"
+        },
+        "params": {
+          "additionalProperties": true,
+          "description": "Parameters to pass to the setup function",
+          "title": "Params",
+          "type": "object"
+        }
+      },
+      "title": "FixtureDefinition",
+      "type": "object"
+    },
+    "IsInstanceCase": {
+      "description": "Type checking evaluation case. Validates that output matches the specified Python type.",
+      "properties": {
+        "type": {
+          "description": "Python type as string to check against. Can use union types with '|'.",
+          "examples": ["int", "str", "bool", "list", "dict", "int | float", "str | None"],
+          "title": "Type",
+          "type": "string"
+        },
+        "strict": {
+          "anyOf": [{"type": "boolean"}, {"type": "null"}],
+          "default": null,
+          "description": "Whether to use strict mode for type validation. When True, performs stricter type checking.",
+          "title": "Strict"
+        }
+      },
+      "required": ["type"],
+      "title": "IsInstanceCase",
+      "type": "object"
+    },
+    "LLMJudgeCase": {
+      "description": "LLM Judge evaluation case. Uses an LLM to evaluate the output based on a rubric.",
+      "properties": {
+        "rubric": {
+          "description": "The rubric/criteria that the LLM should use to evaluate the output.",
+          "examples": [
+            "Does the output equivalent to the expected output?",
+            "Is the output grammatically correct?",
+            "Does the response answer the question accurately?"
+          ],
+          "title": "Rubric",
+          "type": "string"
+        },
+        "include": {
+          "description": "List of context variables to include in the evaluation. Valid options: 'input', 'expected_output'.",
+          "examples": [["input"], ["expected_output"], ["input", "expected_output"]],
+          "items": {
+            "type": "string"
+          },
+          "title": "Include",
+          "type": "array"
+        },
+        "config": {
+          "additionalProperties": true,
+          "description": "Configuration for the LLM model. 'model' is required unless JUDGE_MODEL env var is set.",
+          "title": "Config",
+          "type": "object"
+        }
+      },
+      "required": ["rubric"],
+      "title": "LLMJudgeCase",
+      "type": "object"
+    },
+    "MatchCase": {
+      "additionalProperties": false,
+      "description": "Test case with input, expected output, and optional constraints.",
+      "properties": {
+        "id": {
+          "anyOf": [{"type": "string"}, {"type": "null"}],
+          "default": null,
+          "description": "Optional unique identifier for this test case.",
+          "examples": ["test_positive_numbers", "edge_case_empty_list", "error_invalid_input"],
+          "title": "Id"
+        },
+        "input": {
+          "anyOf": [{}, {"type": "null"}],
+          "default": null,
+          "description": "Single input value to pass to the function as the only argument. Use this when the function takes a single argument. Cannot be used together with 'inputs'.",
+          "examples": [5, "hello", [1, 2, 3], {"x": 10, "y": 20}, {"name": "test", "value": 42}],
+          "title": "Input"
+        },
+        "inputs": {
+          "anyOf": [
+            {"items": {}, "type": "array"},
+            {"additionalProperties": true, "type": "object"},
+            {"type": "null"}
+          ],
+          "default": null,
+          "description": "Multiple input values to pass to the function as separate arguments (*args). Use this when the function takes multiple arguments. Cannot be used together with 'input'.",
+          "examples": [[1, 2], [10, 20, 30], ["hello", "world"], [{"x": 1}, {"y": 2}]],
+          "title": "Inputs"
+        },
+        "expected": {
+          "description": "Expected output value. If provided, output will be compared for equality. Use `null` to expect None.",
+          "examples": [25, "HELLO", [1, 3, 5], true, {"result": 30}, null],
+          "title": "Expected"
+        },
+        "duration": {
+          "anyOf": [{"exclusiveMinimum": 0, "type": "number"}, {"type": "null"}],
+          "default": null,
+          "description": "Maximum allowed execution time in milliseconds for this specific case.",
+          "examples": [100, 500, 1000, 50],
+          "title": "Duration"
+        },
+        "contains": {
+          "anyOf": [{}, {"type": "null"}],
+          "default": null,
+          "description": "Value that should be contained in the output.",
+          "examples": ["substring", 42, "expected_key"],
+          "title": "Contains"
+        },
+        "assertion": {
+          "anyOf": [{"type": "string"}, {"type": "null"}],
+          "default": null,
+          "description": "Optional case-specific Python assertion expression. Same as global assertions but only for this case.\nAvailable variables: input, output, expected, duration, metadata.\nExamples: 'output > 0', 'len(output) == 3', 'output == input * 2'",
+          "examples": ["output > 0", "len(output) == 3", "output % 2 == 0", "output in input"],
+          "title": "Assertion"
+        },
+        "pattern": {
+          "anyOf": [{"type": "string"}, {"type": "null"}],
+          "default": null,
+          "description": "Optional regex pattern to match against the output (converted to string) for this specific case.",
+          "examples": ["^\\d+$", "^[A-Z]+$", ".*@.*\\.com$"],
+          "title": "Pattern"
+        },
+        "case_sensitive": {
+          "default": true,
+          "description": "Whether the regex pattern matching should be case-sensitive (only used if pattern is specified).",
+          "title": "Case Sensitive",
+          "type": "boolean"
+        },
+        "raises": {
+          "anyOf": [{"type": "string"}, {"type": "null"}],
+          "default": null,
+          "description": "Expected exception type for this case. If specified, the test expects the function to raise this exception. Append '?' for optional raises (e.g., 'TypeError?') — passes if the exception is raised OR if the function returns normally.",
+          "examples": ["ValueError", "TypeError", "KeyError", "ZeroDivisionError", "TypeError?"],
+          "title": "Raises"
+        },
+        "type": {
+          "anyOf": [{"type": "string"}, {"type": "null"}],
+          "default": null,
+          "description": "Expected output type for this specific case. Can be a simple type name or a complex type annotation.",
+          "examples": ["int", "str", "list[int]", "dict[str, Any]", "Optional[int]"],
+          "title": "Type"
+        },
+        "strict_type": {
+          "default": false,
+          "description": "If True, exact type match is required (no subclasses). If False (default), subclasses are allowed.",
+          "title": "Strict Type",
+          "type": "boolean"
+        },
+        "match": {
+          "anyOf": [{"type": "string"}, {"type": "null"}],
+          "default": null,
+          "description": "Optional regex pattern to match against the exception message (only used if raises is specified).",
+          "examples": ["invalid input", "must be positive", "not found"],
+          "title": "Match"
+        }
+      },
+      "title": "MatchCase",
+      "type": "object"
+    },
+    "PatternMatchCase": {
+      "description": "Regex pattern matching evaluation case. Validates that output matches a regex pattern.",
+      "properties": {
+        "pattern": {
+          "description": "Regular expression pattern to match against the output (converted to string).",
+          "examples": ["^\\d+$", "^[A-Z]+$", ".*@.*\\.com$", "id: \\d+"],
+          "title": "Pattern",
+          "type": "string"
+        },
+        "case_sensitive": {
+          "default": true,
+          "description": "Whether the regex matching should be case-sensitive.",
+          "title": "Case Sensitive",
+          "type": "boolean"
+        }
+      },
+      "required": ["pattern"],
+      "title": "PatternMatchCase",
+      "type": "object"
+    }
+  }
+}
