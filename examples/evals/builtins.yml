@@ -3,7 +3,7 @@
 
 len:
   dataset:
-    - case: { input: [0], expected: 3 }
+    - case: { input: [1, 2, 3], expected: 3 }
     - case: { input: "hello", expected: 5 }
     - case: { input: [], expected: 0 }
 
