@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vowel"
-version = "0.3.0"
+version = "0.3.0-beta"
 description = "A modular evaluation framework for testing functions with YAML-based specifications"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -25,13 +25,14 @@ classifiers = [
 ]
 
 dependencies = [
-    "click>=8.0.0",
-    "python-dotenv>=1.0.0",
+    "click",
+    "watchdog",
+    "python-dotenv",
     "pyyaml>=6.0.0",
     "pydantic>=2.0.0",
     "pydantic-ai>=1.0.0",
     "pydantic-evals>=1.0.0",
-    "rich>=13.0.0",
+    "rich",
 ]
 
 [project.optional-dependencies]

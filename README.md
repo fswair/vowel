@@ -266,4 +266,4 @@ summary.xml()                  # Export as XML
 
 ## License
 
-MIT License
+Apache License 2.0
