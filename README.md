@@ -4,6 +4,8 @@
 
 vowel makes it easy to define test cases in YAML and run them against your Python functions. It also provides AI-powered generators that can automatically create test specs, generate implementations, and fix buggy functions.
 
+[![PyPI Downloads](https://static.pepy.tech/personalized-badge/vowel?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/vowel) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/fswair/vowel) 
+
 ## Installation
 
 ```bash
