@@ -1,1017 +1,269 @@
-# VOWEL - YAML Based Evaluation Specification
+# VOWEL
 
-Modular evaluation system. Reads and tests function evaluations from YAML files.
+**YAML-based evaluation framework for testing Python functions with AI-powered test generation and function healing.**
 
-## 🚀 Installation
+vowel makes it easy to define test cases in YAML and run them against your Python functions. It also provides AI-powered generators that can automatically create test specs, generate implementations, and fix buggy functions.
 
-### Install Directly
-
-```bash
-# Install in development mode (editable mode)
-pip install -e .
-
-# Or normal installation
-pip install .
-```
-
-### Install from PyPI
+## Installation
 
 ```bash
-# Install in development mode (editable mode)
 pip install vowel
 
-# Or install with uv
+# Or with uv
 uv add vowel
 ```
 
-## 🎯 Usage
-
-After installation, the `vowel` command is available system-wide:
+### Development
 
 ```bash
-# Normal mode - logfire disabled (fast and clean output)
-vowel multi_evals.yml
-
-# Debug mode - logfire enabled (detailed logging)
-vowel multi_evals.yml --debug
-
-# Test only specific functions (comma-separated)
-vowel multi_evals.yml -f make_list,make_square
-
-# Test specific functions (multiple -f flags)
-vowel multi_evals.yml -f make_list -f make_square
-
-# Verbose mode - show error details
-vowel multi_evals.yml -v
-
-# Use all options together
-vowel tests.yml -f uppercase,lowercase --debug -v
-
-# Help
-vowel --help
+git clone https://github.com/fswair/vowel.git
+cd vowel
+pip install -e .
 ```
 
-### CLI Options
+---
 
-- `--debug`: Enables debug mode with detailed logging via logfire
-- `-f, --filter`: Tests only the specified function(s). Use comma-separated values or multiple flags: `-f func1,func2` or `-f func1 -f func2`
-- `-v, --verbose`: Shows detailed output including error reasons
-- `--help`: Shows help message
+## Quick Start
 
-## 📝 YAML Syntax
-
-### Basic Structure
+### 1. Create a YAML spec
 
 ```yaml
-function_name:
-  evals: # Global evaluators (optional)
-    EvaluatorName:
-      # evaluator specific parameters
-  dataset: # Test cases
-    - case:
-        input: <input> # For single-parameter functions
-        # or
-        inputs: [<arg1>, <arg2>, ...] # For multi-parameter functions
-        expected: <expected_output> # Optional
-        assertion: <custom_check> # Optional, case-specific assertion
-        # case-specific evaluators
-```
-
-### Function Naming
-
-vowel allows you to use functions in 3 different ways:
-
-```yaml
-# 1. Builtin functions (len, str, int, etc.)
-len:
+# evals.yml
+add:
   dataset:
     - case:
-        input: [1, 2, 3]
+        inputs: { x: 1, y: 2 }
         expected: 3
+    - case:
+        inputs: { x: -5, y: 5 }
+        expected: 0
 
-# 2. Standard library (module.function format)
-json.dumps:
+divide:
+  evals:
+    Type:
+      type: "float"
   dataset:
     - case:
-        input: { "key": "value" }
-        expected: '{"key": "value"}'
-
-os.path.join:
-  dataset:
+        inputs: { a: 10, b: 2 }
+        expected: 5.0
     - case:
-        inputs: ["/home", "user", "file.txt"] # os.path.join("/home", "user", "file.txt")
-        expected: "/home/user/file.txt"
-
-# 3. Your own functions (via programmatic API)
-# Function name in YAML is passed to run_evals with functions parameter
-multiply:
-  dataset:
-    - case:
-        inputs: [2, 3] # multiply(2, 3) - multi-parameter
-        expected: 6
+        inputs: { a: 1, b: 0 }
+        raises: ZeroDivisionError
 ```
 
-**To use your own functions:**
+### 2. Run from CLI
+
+```bash
+vowel evals.yml
+```
+
+### 3. Or programmatically
 
 ```python
 from vowel import run_evals
 
-def multiply(x: int, y: int) -> int:
-    return x * y
+def add(x: int, y: int) -> int:
+    return x + y
 
-# With YAML file or dict
-summary = run_evals(
-    "evals.yml",  # or dict
-    functions={"multiply": multiply}  # Pass function directly
-)
+def divide(a: float, b: float) -> float:
+    return a / b
+
+summary = run_evals("evals.yml", functions={"add": add, "divide": divide})
+print(f"All passed: {summary.all_passed}")
+print(f"Coverage: {summary.coverage * 100:.1f}%")
 ```
 
-**Or with RunEvals Fluent API:**
+### 4. Or use the fluent API
 
 ```python
 from vowel import RunEvals
 
-def multiply(x: int, y: int) -> int:
-    return x * y
-
-# Cleaner and composable
 summary = (
     RunEvals.from_file("evals.yml")
-    .with_functions({"multiply": multiply})
+    .with_functions({"add": add, "divide": divide})
+    .filter(["add"])
     .debug()
     .run()
 )
 
-print(f"Passed: {summary.all_passed}")
+summary.print()
 ```
 
-> **For detailed information:** [API_USAGE.md](API_USAGE.md) and [RUNEVALS_GUIDE.md](RUNEVALS_GUIDE.md)
+---
 
-### Input Formats
+## Features
 
-**Important:** The difference between `input` and `inputs`:
+### Evaluators
 
-- **`input`**: For single-parameter functions (input value is passed directly to the function)
-- **`inputs`**: For multi-parameter functions (list elements are unpacked as separate arguments)
+8 built-in evaluators for flexible testing:
 
-```yaml
-# Single parameter - use 'input'
-single_param:
-  dataset:
-    - case:
-        input: 42 # Function: single_param(42)
-
-# Multi-parameter - use 'inputs'
-multi_param:
-  dataset:
-    - case:
-        inputs: [10, 20, 30] # Function: multi_param(10, 20, 30)
-
-# Single-parameter function but parameter is a list - use 'input'
-list_param:
-  dataset:
-    - case:
-        input: [1, 2, 3] # Function: list_param([1, 2, 3])
-
-# Complex types - single parameter
-complex_types:
-  dataset:
-    - case:
-        input: [{ "name": "John", "age": 30 }, { "name": "Jane", "age": 25 }]
-
-# Multi-parameter example - max function
-max:
-  dataset:
-    - case:
-        inputs: [5, 10, 3] # max(5, 10, 3)
-        expected: 10
-
-    - case:
-        inputs: [-1, -5, -2] # max(-1, -5, -2)
-        expected: -1
-
-# Single-parameter example - len function
-len:
-  dataset:
-    - case:
-        input: [1, 2, 3, 4] # len([1, 2, 3, 4])
-        expected: 4
-
-    - case:
-        input: "hello" # len("hello")
-        expected: 5
-```
-
-### Complete Example
+| Evaluator | Purpose |
+|-----------|---------|
+| **Expected** | Exact value matching |
+| **Type** | Return type checking (strict/lenient) |
+| **Assertion** | Custom Python expressions (`output > 0`, `output == input * 2`) |
+| **Duration** | Performance constraints (function-level & case-level) |
+| **Pattern** | Regex validation on output |
+| **ContainsInput** | Verify output contains the input |
+| **Raises** | Exception class + optional message matching |
+| **LLMJudge** | AI-powered rubric evaluation |
 
 ```yaml
-make_square:
+factorial:
   evals:
-    # Global evaluators - apply to all cases
-    IsNumber:
-      type: "int | float" # Output must be int or float
-    PositiveCheck:
-      assertion: "output > 0" # Output must be positive
-    FastEnough:
-      duration: 0.01 # Maximum 0.01 seconds
-
-  dataset:
-    # Test case 1
-    - case:
-        input: 5
-        expected: 25 # 5*5 = 25
-
-    # Test case 2 - case-specific evaluator
-    - case:
-        input: -3
-        expected: 9
-        duration: 100 # 100ms limit for this case
-
-    # Test case 3 - only global evaluators
-    - case:
-        input: 10
-        # no expected, only global assertions are tested
-```
-
-## 📊 Evaluators
-
-### 1. Assertion Evaluator
-
-Executes Python code. The `output` variable contains the function result.
-
-```yaml
-function_name:
-  evals:
-    # Simple check
-    PositiveNumber:
+    Assertion:
       assertion: "output > 0"
-
-    # Complex check
-    RangeCheck:
-      assertion: "10 < output < 100"
-
-    # List check
-    ListLength:
-      assertion: "len(output) == 5"
-
-    # String check
-    StartsWith:
-      assertion: "output.startswith('hello')"
-
-    # Type check
-    IsList:
-      assertion: "isinstance(output, list)"
+    Type:
+      type: "int"
+    Duration:
+      duration: 1.0
+  dataset:
+    - case: { input: 0, expected: 1 }
+    - case: { input: 5, expected: 120 }
 ```
 
-**Examples:**
+> **Full reference:** [docs/EVALUATORS.md](docs/EVALUATORS.md)
+
+### Fixtures (Dependency Injection)
+
+Inject databases, temp files, caches into functions under test. Three patterns: generator (yield), tuple (setup/teardown), simple (setup only).
 
 ```yaml
-uppercase:
-  evals:
-    IsString:
-      type: str
-    AllCaps:
-      assertion: "output.isupper()"
-    SameLength:
-      assertion: "len(input) == len(output)"
-  dataset:
-    - case:
-        input: "hello"
-        expected: "HELLO"
+fixtures:
+  db:
+    setup: myapp.setup_db
+    teardown: myapp.close_db
+    scope: module
 
-filter_positive:
-  evals:
-    IsList:
-      type: list
-    AllPositive:
-      assertion: "all(x > 0 for x in output)"
+query_user:
+  fixture: [db]
   dataset:
     - case:
-        input: [1, -2, 3, -4, 5]
-        expected: [1, 3, 5]
+        inputs: { user_id: 1 }
+        expected: { name: "Alice" }
 ```
 
-### 2. Type Evaluator
-
-Checks the type of the output. Supports union types.
-
-```yaml
-function_name:
-  evals:
-    # Single type
-    IsString:
-      type: str
-
-    # Union type
-    IsNumber:
-      type: "int | float"
-
-    # List type
-    IsList:
-      type: list
-
-    # Dict type
-    IsDict:
-      type: dict
+```python
+def query_user(user_id: int, *, db: dict) -> dict | None:
+    return db["users"].get(user_id)
 ```
 
-**Examples:**
+> **Full reference:** [docs/FIXTURES.md](docs/FIXTURES.md)
 
-```yaml
-make_list:
-  evals:
-    IsList:
-      type: list
-  dataset:
-    - case:
-        input: 5
-        expected: [5]
+### Input Serializers
 
-divide:
-  evals:
-    IsNumber:
-      type: "int | float" # accepts int or float
-  dataset:
-    - case:
-        inputs: [10, 2]
-        expected: 5.0
+Transform YAML inputs into Pydantic models, dates, or custom types:
+
+```python
+summary = (
+    RunEvals.from_file("evals.yml")
+    .with_functions({"get_user": get_user})
+    .with_serializer({"get_user": User})      # Schema mode
+    .run()
+)
 ```
 
-### 3. Duration Evaluator
+> **Full reference:** [docs/SERIALIZERS.md](docs/SERIALIZERS.md)
 
-Checks the execution time of the function.
+### AI-Powered Generation
 
-```yaml
-# Global level (seconds)
-function_name:
-  evals:
-    FastEnough:
-      duration: 0.01  # maximum 0.01 seconds (10ms)
+#### EvalGenerator — test existing functions
 
-# Case level (milliseconds)
-function_name:
-  dataset:
-    - case:
-        input: 100
-        duration: 50  # maximum 50 milliseconds
+```python
+from vowel import EvalGenerator, Function
+
+generator = EvalGenerator(model="openai:gpt-4o", load_env=True)
+func = Function.from_callable(my_function)
+
+result = generator.generate_and_run(func, auto_retry=True, heal_function=True)
+print(f"Coverage: {result.summary.coverage * 100:.1f}%")
 ```
 
-**Example:**
+#### TDDGenerator — generate everything from a description
 
-```yaml
-fibonacci:
-  evals:
-    FastEnough:
-      duration: 0.001 # 1ms limit
-  dataset:
-    - case:
-        input: 10
-        expected: 55
+```python
+from vowel.tdd import TDDGenerator
 
-    - case:
-        input: 20
-        expected: 6765
-        duration: 10 # 10ms limit for this case
+generator = TDDGenerator(model="gemini-3-flash-preview", load_env=True)
+
+result = generator.generate_all(
+    description="Binary search for target in sorted list. Returns index or -1.",
+    name="binary_search"
+)
+
+result.print()  # Shows: signature → tests → code → results
 ```
 
-### 4. Contains Input Evaluator
+Step-by-step control:
 
-Checks if the input is contained in the output.
-
-```yaml
-function_name:
-  evals:
-    ContainsInput:
-      contains_input:
-        case_sensitive: true # Case sensitive (default: true)
-        as_strings: false # Convert to string and compare (default: false)
+```python
+signature = generator.generate_signature(description="...", name="factorial")
+runner, yaml_spec = generator.generate_evals_from_signature(signature)
+func = generator.generate_implementation(signature, yaml_spec)
+summary = runner.with_functions({"factorial": func.impl}).run()
 ```
 
-**Examples:**
+> **Full reference:** [docs/AI_GENERATION.md](docs/AI_GENERATION.md)
 
-```yaml
-wrap_string:
-  evals:
-    ContainsInput:
-      contains_input:
-        case_sensitive: true
-  dataset:
-    - case:
-        input: "world"
-        expected: "Hello, world!"
+### MCP Server
 
-repeat_list:
-  evals:
-    ContainsInput:
-      contains_input:
-        as_strings: true # [1,2] → "[1, 2]" as string
-  dataset:
-    - case:
-        input: [1, 2, 3]
-        expected: [1, 2, 3, 1, 2, 3]
-```
+Expose vowel's capabilities to AI assistants like Claude Desktop via Model Context Protocol.
 
-### 5. Expected Evaluator (Case Level)
+> **Setup guide:** [docs/MCP.md](docs/MCP.md)
 
-Compares the expected output with the actual output.
+---
 
-```yaml
-function_name:
-  dataset:
-    - case:
-        input: 5
-        expected: 25 # output == 25
-```
-
-**Examples:**
-
-```yaml
-add:
-  dataset:
-    - case:
-        inputs: [2, 3]
-        expected: 5
-
-    - case:
-        inputs: [10, -5]
-        expected: 5
-
-multiply:
-  dataset:
-    - case:
-        inputs: [3, 4]
-        expected: 12
-```
-
-### 6. Contains Evaluator (Case Level)
-
-Checks if a specific value is contained in the output.
-
-```yaml
-function_name:
-  dataset:
-    - case:
-        input: "test"
-        contains: "expected_substring"
-```
-
-**Example:**
-
-```yaml
-generate_html:
-  dataset:
-    - case:
-        input: "Title"
-        contains: "<h1>Title</h1>" # This string must be in output
-
-    - case:
-        input: "Link"
-        contains: "<a>" # This must also be in output
-```
-
-### 7. Pattern Matching Evaluator (Regex)
-
-Validates that output matches a regular expression pattern. Works at both global and case levels.
-
-```yaml
-# Global level - applies to all cases
-function_name:
-  evals:
-    PatternName:
-      pattern: "regex_pattern"
-      case_sensitive: true  # Optional, default: true
-
-# Case level - specific to one case
-function_name:
-  dataset:
-    - case:
-        input: "test"
-        pattern: "regex_pattern"
-        case_sensitive: false  # Optional
-```
-
-**Examples:**
-
-```yaml
-# Validate email format
-validate_email:
-  evals:
-    HasAtSign:
-      pattern: "@"
-    ValidDomain:
-      pattern: "\\.(com|org|net)$"
-  dataset:
-    - case:
-        input: "test@example.com"
-        expected: "test@example.com"
-
-    - case:
-        input: "admin@test.org"
-        expected: "admin@test.org"
-        pattern: "\\.org$" # Case-specific pattern
-
-# Format validation
-format_id:
-  evals:
-    CorrectFormat:
-      pattern: "^id: \\d+$"
-      case_sensitive: true
-  dataset:
-    - case:
-        input: 123
-        expected: "id: 123"
-
-    - case:
-        input: 456
-        expected: "ID: 456"
-        pattern: "^ID: \\d+$" # Different pattern for this case
-
-# Case insensitive matching
-normalize_text:
-  dataset:
-    - case:
-        input: "Hello"
-        expected: "HELLO WORLD"
-        pattern: "hello"
-        case_sensitive: false # Matches "HELLO" too
-
-    - case:
-        input: "test"
-        expected: "TEST123"
-        pattern: "^[A-Z]+\\d+$" # Only uppercase letters + digits
-
-# Multiple patterns
-phone_format:
-  evals:
-    HasDigits:
-      pattern: "\\d+"
-  dataset:
-    - case:
-        input: "1234567890"
-        expected: "+1 (123) 456-7890"
-        pattern: "^\\+\\d+ \\(\\d{3}\\) \\d{3}-\\d{4}$"
-
-    - case:
-        input: "9876543210"
-        expected: "987-654-3210"
-        pattern: "^\\d{3}-\\d{3}-\\d{4}$"
-```
-
-**Common Regex Patterns:**
-
-```yaml
-# Numbers only
-pattern: "^\\d+$"
-
-# Uppercase letters only
-pattern: "^[A-Z]+$"
-
-# Email format
-pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
-
-# URL format
-pattern: "^https?://.*"
-
-# Contains specific word
-pattern: "\\bword\\b"
-
-# Starts with prefix
-pattern: "^prefix"
-
-# Ends with suffix
-pattern: "suffix$"
-```
-
-### 8. Raises Evaluator (Exception Testing)
-
-Tests that a function raises a specific exception. Similar to pytest's `pytest.raises`, this evaluator verifies both the exception type and optionally the exception message pattern. This is a **case-level only** evaluator.
-
-```yaml
-function_name:
-  dataset:
-    - case:
-        input: invalid_value
-        raises: ExceptionType # Required: exception type name
-        match: "pattern" # Optional: regex pattern for exception message
-```
-
-**Important Notes:**
-
-- `raises` is **case-level only** - cannot be used as a global evaluator
-- `match` can only be used together with `raises`
-- When `raises` is specified, the test expects an exception and will fail if the function returns normally
-- Global evaluators (type checks, assertions, etc.) are automatically skipped for exception cases
-
-**Examples:**
-
-```yaml
-# Basic exception testing
-calculate_discount:
-  evals:
-    IsFloat:
-      type: float
-  dataset:
-    - case:
-        id: "valid_calculation"
-        inputs: [100.0, 20.0]
-        expected: 80.0
-
-    - case:
-        id: "negative_price"
-        inputs: [-100.0, 20.0]
-        raises: ValueError
-        match: "must be positive" # Checks exception message
-
-    - case:
-        id: "invalid_discount"
-        inputs: [100.0, 150.0]
-        raises: ValueError # Just checks type, not message
-
-# Division by zero
-divide:
-  evals:
-    IsNumber:
-      type: "int | float"
-  dataset:
-    - case:
-        inputs: [10, 2]
-        expected: 5.0
-
-    - case:
-        inputs: [10, 0]
-        raises: ZeroDivisionError
-
-# Type validation
-parse_age:
-  dataset:
-    - case:
-        input: "25"
-        expected: 25
-
-    - case:
-        input: "invalid"
-        raises: ValueError
-        match: "invalid literal"
-
-    - case:
-        input: -5
-        raises: ValueError
-        match: "age must be positive"
-
-# Key errors
-get_config_value:
-  dataset:
-    - case:
-        input: "api_key"
-        expected: "secret_key_123"
-
-    - case:
-        input: "nonexistent_key"
-        raises: KeyError
-        match: "nonexistent_key"
-
-# Multiple exception types
-process_data:
-  dataset:
-    - case:
-        input: { "valid": "data" }
-        expected: "processed"
-
-    - case:
-        input: null
-        raises: TypeError
-        match: "NoneType"
-
-    - case:
-        input: []
-        raises: ValueError
-        match: "empty"
-
-    - case:
-        input: { "invalid": "format" }
-        raises: KeyError
-
-# Index errors
-get_element:
-  dataset:
-    - case:
-        inputs: [[1, 2, 3], 1]
-        expected: 2
-
-    - case:
-        inputs: [[1, 2, 3], 10]
-        raises: IndexError
-        match: "out of range"
-```
-
-**How it works:**
-
-1. When `raises` is present in a case, the framework wraps the function execution in a try-catch
-2. If an exception is raised:
-   - Checks if exception type matches `raises`
-   - If `match` is provided, validates exception message against the regex pattern
-   - Global evaluators are skipped (they would fail on exception dict)
-3. If no exception is raised when `raises` is specified, the test fails
-4. If exception type doesn't match, the test fails and shows actual vs expected
-
-**Common Exception Types:**
-
-- `ValueError`: Invalid value/argument
-- `TypeError`: Wrong type
-- `KeyError`: Missing dictionary key
-- `IndexError`: List/array index out of range
-- `ZeroDivisionError`: Division by zero
-- `AttributeError`: Missing attribute
-- `FileNotFoundError`: File doesn't exist
-- `RuntimeError`: Generic runtime error
-
-### 9. LLM Judge Evaluator
-
-Uses a Language Model to evaluate outputs based on a custom rubric. Ideal for semantic evaluation, quality assessment, and cases where rule-based checking is insufficient.
-
-```yaml
-function_name:
-  evals:
-    JudgeName:
-      rubric: "Evaluation criteria/question for the LLM"
-      include: # Optional, what context to provide to LLM
-        - input # Include the input
-        - expected_output # Include expected output
-      config: # Model configuration
-        model: "provider:model_name" # Required (or set JUDGE_MODEL env var)
-        temperature: 0.7 # Optional
-        max_tokens: 2096 # Optional
-        # ... other optional model parameters
-        # parameters will be passed into
-        # pydantic_ai.settings.ModelSettings ctor
-```
-
-**Configuration:**
-
-- `rubric`: **Required** - The evaluation criteria or question for the LLM
-- `include`: **Optional** - List of context variables. Valid options:
-  - `input`: Include function input
-  - `expected_output`: Include expected output
-  - **Note:** Output is always included automatically
-- `config`: Model configuration
-  - `model`: **Required** (unless `JUDGE_MODEL` environment variable is set)
-  - All other parameters are optional (temperature, max_tokens, top_p, etc.)
-
-**Examples:**
-
-```yaml
-# Basic semantic equivalence check
-translate_to_english:
-  evals:
-    SemanticMatch:
-      rubric: "Does the output have the same meaning as the expected output?"
-      include:
-        - expected_output
-      config:
-        model: "groq:qwen/qwen-2.5-72b-instruct"
-        temperature: 0.0
-  dataset:
-    - case:
-        input: "Bonjour"
-        expected: "Hello"
-
-    - case:
-        input: "Comment allez-vous?"
-        expected: "How are you?"
-
-# Grammar and style checking
-generate_response:
-  evals:
-    IsGrammaticallyCorrect:
-      rubric: "Is the output grammatically correct and well-formatted?"
-      config:
-        model: "groq:qwen/qwen-2.5-72b-instruct"
-        temperature: 0.0
-        max_tokens: 512
-  dataset:
-    - case:
-        input: "Write a greeting"
-        expected: "Hello! How can I help you today?"
-
-# Quality assessment with input context
-summarize_text:
-  evals:
-    IsGoodSummary:
-      rubric: "Is the output a good summary of the input text? Does it capture the main points?"
-      include:
-        - input
-      config:
-        model: "openai:gpt-4o-mini"
-        temperature: 0.1
-  dataset:
-    - case:
-        input: "Long article text here..."
-        expected: "Brief summary..."
-
-# Using environment variable for model
-# Set: export JUDGE_MODEL="groq:qwen/qwen-2.5-72b-instruct"
-check_correctness:
-  evals:
-    AnswerQuality:
-      rubric: "Does the output correctly answer the question based on the input?"
-      include:
-        - input
-        - expected_output
-      config:
-        temperature: 0.0 # model comes from JUDGE_MODEL env var
-  dataset:
-    - case:
-        input: "What is 2+2?"
-        expected: "4"
-
-# Multiple criteria with different judges
-write_code:
-  evals:
-    Correctness:
-      rubric: "Is the code functionally correct?"
-      include:
-        - input
-      config:
-        model: "openai:gpt-4o"
-        temperature: 0.0
-
-    Readability:
-      rubric: "Is the code well-structured and readable?"
-      config:
-        model: "openai:gpt-4o"
-        temperature: 0.0
-  dataset:
-    - case:
-        input: "Write a function to reverse a string"
-        expected: "def reverse(s): return s[::-1]"
-```
-
-**Supported Models:**
-
-- **OpenAI**: `openai:gpt-4o`, `openai:gpt-4o-mini`, `openai:gpt-4-turbo`
-- **Groq**: `groq:llama-3.3-70b-versatile`, `groq:qwen/qwen-2.5-72b-instruct`
-- **Anthropic**: `anthropic:claude-3-5-sonnet-20241022`
-- Any model supported by [pydantic-ai](https://ai.pydantic.dev/)
-
-**Tips:**
-
-- Use `temperature: 0.0` for consistent evaluation
-- Be specific in your rubric - clear criteria = better evaluation
-- Use `include: [input, expected_output]` when the LLM needs full context
-- Set `JUDGE_MODEL` environment variable to avoid repeating model config
-- Combine with other evaluators for comprehensive testing
-
-## 🎨 Advanced Examples
-
-### Using Multiple Evaluators
-
-```yaml
-process_numbers:
-  evals:
-    # Global evaluators
-    IsList:
-      type: list
-    NotEmpty:
-      assertion: "len(output) > 0"
-    AllPositive:
-      assertion: "all(x > 0 for x in output)"
-    Performance:
-      duration: 0.01
-
-  dataset:
-    - case:
-        input: [1, -2, 3, -4, 5]
-        expected: [1, 3, 5] # Case-specific expected
-        duration: 50 # Case-specific duration (ms)
-```
-
-### Complex Test Scenario
-
-```yaml
-json.loads:
-  evals:
-    IsDict:
-      type: dict
-    HasKey:
-      assertion: "'name' in output"
-
-  dataset:
-    - case:
-        input: '{"name": "John", "age": 30}'
-        expected: { "name": "John", "age": 30 }
-
-    - case:
-        input: '{"name": "Jane"}'
-        contains: "Jane" # converted to string with as_strings
-
-str.split:
-  evals:
-    IsList:
-      type: list
-
-  dataset:
-    - case:
-        inputs: ["hello,world", ","]
-        expected: ["hello", "world"]
-
-    - case:
-        inputs: ["a-b-c", "-"]
-        expected: ["a", "b", "c"]
-        assertion: "len(output) == 3" # Case-specific assertion
-```
-
-## 💡 Tips
-
-### 1. Global vs Case Evaluators
-
-```yaml
-# Global: Applies to all cases
-evals:
-  TypeCheck:
-    type: int
-
-# Case-specific: Applies only to that case
-dataset:
-  - case:
-      input: 5
-      expected: 25
-      duration: 100
-```
-
-### 2. Testing Without Expected
-
-```yaml
-# Test only with global evaluators
-validate_format:
-  evals:
-    IsString:
-      type: str
-    HasPrefix:
-      assertion: "output.startswith('prefix_')"
-
-  dataset:
-    - case:
-        input: "test"
-        # no expected, only the above checks are performed
-```
-
-### 3. Using Input in Assertions
-
-```yaml
-double:
-  evals:
-    IsDouble:
-      assertion: "output == input * 2"
-
-  dataset:
-    - case:
-        input: 5
-        # even without expected: 10, assertion checks it
-```
-
-### 4. Testing Multiple Functions
-
-```yaml
-# test.yml
-len:
-  dataset:
-    - case:
-        input: [1, 2, 3]
-        expected: 3
-
-json.dumps:
-  dataset:
-    - case:
-        input: { "key": "value" }
-        expected: '{"key": "value"}'
-
-make_list:
-  dataset:
-    - case:
-        input: 5
-        expected: [5]
-```
+## CLI
 
 ```bash
-# Test all
-vowel test.yml
-
-# Test only one
-vowel test.yml -f len
-
-# Test multiple (comma-separated)
-vowel test.yml -f len,json.dumps
-
-# Test multiple (separate flags)
-vowel test.yml -f len -f json.dumps -f make_list
+vowel evals.yml                          # Run single file
+vowel -d ./tests                         # Run directory
+vowel evals.yml -f add,divide            # Filter functions
+vowel evals.yml --ci --coverage 90       # CI mode
+vowel evals.yml --watch                  # Watch mode
+vowel evals.yml --dry-run                # Show plan without running
+vowel evals.yml --export-json out.json   # Export results
 ```
 
-## 📚 Documentation
+> **Full reference:** [docs/CLI.md](docs/CLI.md)
 
-- **[RUNEVALS_GUIDE.md](https://github.com/fswair/vowel/blob/main/docs/RUNEVALS_GUIDE.md)** - RunEvals fluent API
-- **[ASSERTION_CONTEXT.md](https://github.com/fswair/vowel/blob/main/docs/ASSERTION_CONTEXT.md)** - Assertion variables
-- **[EXAMPLES/](https://github.com/fswair/vowel/blob/main/examples/)** - Working examples here
+---
 
-## 📄 License
+## EvalSummary
 
-Apache 2.0
+```python
+summary = run_evals("evals.yml", functions={...})
+
+summary.all_passed       # bool
+summary.success_count    # int
+summary.failed_count     # int
+summary.total_count      # int
+summary.coverage         # float (0.0-1.0)
+summary.failed_results   # list[EvalResult]
+
+summary.meets_coverage(0.9)    # Check threshold
+summary.print()                # Rich formatted output
+summary.to_json()              # Export as dict
+summary.xml()                  # Export as XML
+```
+
+---
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [YAML Spec](docs/YAML_SPEC.md) | Complete YAML format reference |
+| [Evaluators](docs/EVALUATORS.md) | All 8 evaluator types |
+| [Fixtures](docs/FIXTURES.md) | Dependency injection guide |
+| [Serializers](docs/SERIALIZERS.md) | Input serializer patterns |
+| [AI Generation](docs/AI_GENERATION.md) | EvalGenerator & TDDGenerator |
+| [CLI](docs/CLI.md) | Command-line reference |
+| [MCP Server](docs/MCP.md) | AI assistant integration |
+| [Troubleshooting](docs/TROUBLESHOOTING.md) | Common errors & solutions |
+
+---
+
+## License
+
+MIT License

@@ -1,29 +1,55 @@
-import importlib.util
+"""Evaluator implementations for the vowel framework.
+
+This module contains the concrete evaluator classes that implement
+the evaluation logic defined in eval_types.py. Each evaluator
+integrates with pydantic-evals to provide result reporting.
+
+Evaluators:
+    AssertionEvaluator: Runs Python assertion expressions
+    TypeAdapterEvaluator: Validates output types using Pydantic
+    ContainsInputEvaluator: Checks if output contains input value
+    PatternMatchingEvaluator: Validates output against regex patterns
+    RaisesEvaluator: Validates expected exception raising
+
+Factory functions:
+    create_llm_judge: Creates an LLM-based judge evaluator
+    prepare_env_and_condition: Prepares evaluation context
+"""
+
+import logging
 import os
 import re
 import typing
 from dataclasses import dataclass
 
 import dotenv
+from pydantic import ValidationError
 from pydantic.type_adapter import TypeAdapter
 from pydantic_ai.settings import ModelSettings
 from pydantic_evals.evaluators import EvaluationReason, Evaluator, EvaluatorContext, LLMJudge
 
+from .monitoring import enable_monitoring
+
+logger = logging.getLogger(__name__)
+
 dotenv.load_dotenv()
 
-if os.environ.get("LOGFIRE_ENABLED") in ("1", "true", "True"):
-    if importlib.util.find_spec("logfire"):
-        import logfire
+# ── Logfire Monitoring & Observability ──
 
-        logfire.configure()
-        logfire.instrument_pydantic_ai()
-    else:
-        raise ImportError(
-            "LOGFIRE_ENABLED is set but logfire is not installed. Please install logfire or set LOGFIRE_ENABLED=false"
-        )
+enable_monitoring(service_name="vowel")
 
 
 def prepare_env_and_condition(ctx: EvaluatorContext, condition: str) -> tuple[dict, str]:
+    """
+    Prepare environment variables and format condition string for evaluation.
+
+    Args:
+        ctx: EvaluatorContext containing inputs, output, expected, etc.
+        condition: The condition string to format
+
+    Returns:
+        Tuple of (environment dict, formatted condition string)
+    """
     actual_input = ctx.inputs
     if isinstance(ctx.inputs, dict):
         if "input" in ctx.inputs:
@@ -40,32 +66,38 @@ def prepare_env_and_condition(ctx: EvaluatorContext, condition: str) -> tuple[di
         "duration": ctx.duration,
     }
 
-    for key in env:
-        if isinstance(env[key], str):
-            value = f"`{env[key]}`"
-        else:
-            value = repr(env[key])
-        condition = condition.replace(key, value)
-    return env, condition
+    formatted_condition = condition
+    for key, val in env.items():
+        formatted_val = f"`{val}`" if isinstance(val, str) else repr(val)
+        formatted_condition = re.sub(rf"\b{re.escape(key)}\b", formatted_val, formatted_condition)
+
+    return env, formatted_condition
 
 
 @dataclass
 class AssertionEvaluator(Evaluator):
+    """Evaluator that runs a Python assertion expression.
+
+    The condition is evaluated with access to input, output, expected,
+    metrics, metadata, and duration variables.
+    """
 
     def __init__(self, condition: str, *, evaluation_name: str = "Assertion"):
         self.condition = condition
         self.evaluation_name = evaluation_name
 
-    def evaluate(self, ctx: EvaluatorContext) -> bool:
+    def evaluate(self, ctx: EvaluatorContext) -> EvaluationReason:
+        """Evaluate the assertion condition against the context."""
         if isinstance(ctx.output, dict) and "_exception" in ctx.output:
             return EvaluationReason(value=True, reason="Skipped (exception case)")
+        if "__import__" in self.condition:
+            raise ValueError(f"__import__ is not allowed in assertions: {self.condition}")
         env, condition = prepare_env_and_condition(ctx, self.condition)
-        try:
-            assert eval(self.condition, env, env)
+        if eval(self.condition, env, env):
             return EvaluationReason(
                 value=True, reason=f"Assertion passed for condition: {condition}"
             )
-        except AssertionError:
+        else:
             return EvaluationReason(
                 value=False, reason=f"Assertion failed for condition: {condition}"
             )
@@ -73,32 +105,48 @@ class AssertionEvaluator(Evaluator):
 
 @dataclass
 class TypeAdapterEvaluator(Evaluator):
+    """Evaluator that validates output type using Pydantic TypeAdapter.
+
+    Supports union types (e.g., 'int | float') and optional strict mode.
+    """
 
     type: str
     evaluation_name: str = "Exact Type"
     strict: bool | None = None
 
-    def evaluate(self, ctx: EvaluatorContext) -> bool:
+    def evaluate(self, ctx: EvaluatorContext) -> EvaluationReason:
+        """Validate that output matches the expected type."""
         if isinstance(ctx.output, dict) and "_exception" in ctx.output:
             return EvaluationReason(value=True, reason="Skipped (exception case)")
         type_env = {"typing": typing}
-        expected_type = eval(self.type, type_env, type_env)
-        ta = TypeAdapter(expected_type)
+        try:
+            expected_type = eval(self.type, type_env, type_env)
+            ta = TypeAdapter(expected_type)
+        except Exception:
+            return EvaluationReason(
+                value=False,
+                reason=f"Invalid type expression: Failed to determine type {self.type!r}.",
+            )
         try:
             ta.validate_python(ctx.output, strict=self.strict)
             return EvaluationReason(value=True, reason=f"Output is of type {self.type!r}")
-        except:
-            return EvaluationReason(value=False, reason=f"Output is not of type {self.type!r}")
+        except (ValidationError, TypeError, ValueError) as e:
+            return EvaluationReason(value=False, reason=f"Output is not of type {self.type!r}: {e}")
 
 
 @dataclass
 class ContainsInputEvaluator(Evaluator):
+    """Evaluator that checks if output contains the input value.
+
+    Supports case-sensitive/insensitive comparison and string conversion.
+    """
 
     evaluation_name: str = "ContainsInput"
     case_sensitive: bool = True
     as_strings: bool = False
 
     def evaluate(self, ctx: EvaluatorContext) -> EvaluationReason:
+        """Check if output contains the input value."""
         if isinstance(ctx.output, dict) and "_exception" in ctx.output:
             return EvaluationReason(value=True, reason="Skipped (exception case)")
         input_value = ctx.inputs
@@ -149,12 +197,17 @@ class ContainsInputEvaluator(Evaluator):
 
 @dataclass
 class PatternMatchingEvaluator(Evaluator):
+    """Evaluator that validates output matches a regex pattern.
+
+    Converts output to string before matching.
+    """
 
     pattern: str
     evaluation_name: str = "RegEx Match"
     case_sensitive: bool = True
 
     def evaluate(self, ctx: EvaluatorContext) -> EvaluationReason:
+        """Check if output matches the regex pattern."""
         if isinstance(ctx.output, dict) and "_exception" in ctx.output:
             return EvaluationReason(value=True, reason="Skipped (exception case)")
         flags = 0 if self.case_sensitive else re.IGNORECASE
@@ -174,32 +227,56 @@ class PatternMatchingEvaluator(Evaluator):
 
 @dataclass
 class RaisesEvaluator(Evaluator):
-    """Evaluator for checking if function raised expected exception."""
+    """Evaluator for checking if function raised expected exception.
+
+    When optional=True (from 'raises: TypeError?' syntax), the evaluator
+    passes if the function returns normally OR raises the expected exception.
+    It only fails if a DIFFERENT exception type is raised.
+    """
 
     expected_exception_type: str
     expected_exception_match: str | None = None
+    optional: bool = False
     evaluation_name: str = "Raises"
 
     def evaluate(self, ctx: EvaluatorContext) -> EvaluationReason:
         output = ctx.output
         if not isinstance(output, dict) or "_exception" not in output:
+            if self.optional:
+                return EvaluationReason(
+                    value=True,
+                    reason=(
+                        f"Function returned normally (optional raises: "
+                        f"{self.expected_exception_type}? — OK)"
+                    ),
+                )
             return EvaluationReason(
                 value=False,
-                reason=f"Expected {self.expected_exception_type} to be raised, but function returned normally with output: {output!r}",
+                reason=(
+                    f"Expected {self.expected_exception_type} to be raised, "
+                    f"but function returned normally with output: {output!r}"
+                ),
             )
         actual_exception = output["_exception"]
         actual_type = output["_exception_type"]
         if actual_type != self.expected_exception_type:
             return EvaluationReason(
                 value=False,
-                reason=f"Expected {self.expected_exception_type}, but got {actual_type}: {actual_exception}",
+                reason=(
+                    f"Expected {self.expected_exception_type}, "
+                    f"but got {actual_type}: {actual_exception}"
+                ),
             )
         if self.expected_exception_match:
             exception_message = str(actual_exception)
             if not re.search(self.expected_exception_match, exception_message):
                 return EvaluationReason(
                     value=False,
-                    reason=f"Exception type matches ({actual_type}), but message doesn't match pattern {self.expected_exception_match!r}. Message: {exception_message}",
+                    reason=(
+                        f"Exception type matches ({actual_type}), but message doesn't "
+                        f"match pattern {self.expected_exception_match!r}. "
+                        f"Message: {exception_message}"
+                    ),
                 )
         reason = f"Correctly raised {actual_type}"
         if self.expected_exception_match:
@@ -226,7 +303,8 @@ def create_llm_judge(
         model = os.getenv(env_var)
         if not model:
             raise ValueError(
-                f"Environment variable {env_var} is not set for judge model, set {env_var} to a valid model name."
+                f"Environment variable {env_var} is not set for judge model, "
+                f"set {env_var} to a valid model name."
             )
 
     include_input = False

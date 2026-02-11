@@ -1,0 +1,38 @@
+# Fixtures example
+# Fixtures are injected as keyword-only arguments to functions.
+# Declare them with `fixture: [name]` on the function spec.
+# Provide actual setup/teardown via .with_fixtures() in Python.
+
+# The function signature must be:
+#   def write_and_count(content: str, *, tmp: str) -> int:
+# where `tmp` is a keyword-only arg matching the fixture name.
+
+write_and_count:
+  fixture:
+    - tmp
+  dataset:
+    - case:
+        input: "Hello World"
+        expected: 11
+    - case:
+        input: "Test"
+        expected: 4
+
+count_users:
+  fixture:
+    - db
+  dataset:
+    - case:
+        input: "Alice"
+        expected: 2
+    - case:
+        input: "Bob"
+        expected: 2
+
+add_with_bonus:
+  fixture:
+    - config
+  dataset:
+    - case:
+        inputs: { a: 1, b: 2 }
+        expected: 13

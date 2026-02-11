@@ -1,0 +1,10 @@
+{
+  "6e0150a403c6d938": {
+    "rubric": "properly capitalized",
+    "input_preview": "john doe",
+    "result": {
+      "passed": false,
+      "model": "openrouter:google/gemini-3-pro-preview"
+    }
+  }
+}

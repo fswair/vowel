@@ -1,0 +1,9 @@
+{
+  "b49636b6e18ec069": {
+    "rubric": "mention number of items",
+    "input_preview": "[1, 2, 3, 4, 5]",
+    "result": {
+      "passed": false
+    }
+  }
+}

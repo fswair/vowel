@@ -27,14 +27,6 @@ env/
 .venv
 .env
 
-# Experimental
-src/vowel/ai.py
-AGENT_*.md
-tests/
-functions/
-eval_gen.py
-demo.txt
-
 # IDE
 .vscode/
 .logfire/
@@ -52,7 +44,6 @@ htmlcov/
 .tox/
 
 # Backup files
-yedekler/
 *.backup
 *.bak
 
@@ -64,4 +55,21 @@ yedekler/
 build/
 dist/
 *.egg-info/
-examples/test_ci.yml
+tmp/
+
+# Skills
+skills/
+
+# Cache
+.ruff_cache
+uv.lock
+
+# Testing
+tmp/
+benchmarks/
+
+# !!
+TODO
+
+# Experimental
+run.py

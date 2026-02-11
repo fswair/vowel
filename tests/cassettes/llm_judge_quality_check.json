@@ -1,0 +1,10 @@
+{
+  "c87538d17d7dc7ca": {
+    "rubric": "Summary should capture main idea",
+    "input_preview": "The quick brown fox...",
+    "result": {
+      "passed": false,
+      "coverage": 0.0
+    }
+  }
+}

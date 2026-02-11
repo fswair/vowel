@@ -1,0 +1,37 @@
+# Fluent API example specs
+
+double:
+  evals:
+    IsInt:
+      type: int
+  dataset:
+    - case: { input: 5, expected: 10 }
+    - case: { input: 0, expected: 0 }
+    - case: { input: -4, expected: -8 }
+
+triple:
+  dataset:
+    - case: { input: 3, expected: 9 }
+    - case: { input: -1, expected: -3 }
+
+reverse:
+  evals:
+    IsString:
+      type: str
+  dataset:
+    - case: { input: "hello", expected: "olleh" }
+    - case: { input: "abcba", expected: "abcba" }
+    - case: { input: "", expected: "" }
+
+fizzbuzz:
+  evals:
+    IsString:
+      type: str
+    ValidOutput:
+      pattern: "^(Fizz|Buzz|FizzBuzz|\\d+)$"
+  dataset:
+    - case: { input: 1, expected: "1" }
+    - case: { input: 3, expected: "Fizz" }
+    - case: { input: 5, expected: "Buzz" }
+    - case: { input: 15, expected: "FizzBuzz" }
+    - case: { input: 7, expected: "7" }

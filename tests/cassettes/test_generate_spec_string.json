@@ -1,0 +1,10 @@
+{
+  "ffa96abb899749b1": {
+    "prompt_preview": "generate_spec",
+    "model": "openrouter:google/gemini-3-flash-preview",
+    "response": {
+      "yaml_spec": "reverse_string:\n  evals:\n    IsString:\n      type: str\n    PreservesLength:\n      assertion: \"len(output) == len(input)\"\n    Reversible:\n      assertion: \"output[::-1] == input\"\n    FastPerformance:\n      duration: 0.001\n  dataset:\n    - case:\n        id: typical_word\n        input: \"hello\"\n        expected: \"olleh\"\n    \n    - case:\n        id: sentence_with_spaces\n        input: \"vowel eval\"\n        expected: \"lave lewow\"\n    \n    - case:\n        id: numeric_string\n        input: \"123456789\"\n        expected: \"987654321\"\n    \n    - case:\n        id: palindrome\n        input: \"racecar\"\n        expected: \"racecar\"\n        assertion: \"output == input\"\n    \n    - case:\n        id: empty_string\n        input: \"\"\n        expected: \"\"\n    \n    - case:\n        id: single_character\n        input: \"A\"\n        expected: \"A\"\n    \n    - case:\n        id: special_characters\n        input: \"!@#$%^&*\"\n        expected: \"*&^%$#@!\"\n    \n    - case:\n        id: invalid_type_none\n        input: null\n        raises: TypeError\n    \n    - case:\n        id: invalid_type_int\n        input: 123\n        raises: TypeError\n",
+      "func_name": "reverse_string"
+    }
+  }
+}

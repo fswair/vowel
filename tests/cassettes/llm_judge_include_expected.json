@@ -1,0 +1,9 @@
+{
+  "3a5c2c9625501189": {
+    "rubric": "same meaning as expected",
+    "input_preview": "Hello -> Hola",
+    "result": {
+      "passed": false
+    }
+  }
+}

@@ -1,7 +1,197 @@
-import os
-from typing import Any, Dict, List, Optional, Union
+"""Pydantic models for vowel evaluation specifications.
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+This module defines the data models used to parse and validate
+YAML evaluation specifications. These models ensure type safety
+and provide clear schemas for evaluation definitions.
+
+Main evaluation types:
+    IsInstanceCase: Type checking validation
+    AssertionCase: Custom Python assertion evaluation
+    DurationCase: Performance/timing validation
+    ContainsInputCase: Input containment check
+    PatternMatchCase: Regex pattern matching
+    RaisesCase: Exception validation
+    LLMJudgeCase: LLM-based semantic evaluation
+
+Container models:
+    MatchCase: Individual test case with input/expected output
+    DatasetCase: Wrapper for test cases in dataset
+    Evals: Complete evaluation specification for a function
+    EvalsFile: Root model for YAML file parsing
+"""
+
+import logging
+import os
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic.experimental.missing_sentinel import MISSING
+
+# Re-export MISSING as Missing for cleaner API
+Missing = MISSING
+
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# LLM Output Models
+# =============================================================================
+
+_EXAMPLE_LEVENSHTEIN = """levenshtein:
+  evals:
+    ReturnType:
+      type: int
+    NonNegative:
+      assertion: "output >= 0"
+    UpperBound:
+      assertion: "output <= max(len(input[0]), len(input[1]))"
+    IdentityProperty:
+      assertion: "(input[0] == input[1]) == (output == 0)"
+  dataset:
+    - case:
+        id: identical_strings
+        inputs: ["kitten", "kitten"]
+        expected: 0
+    - case:
+        id: empty_to_word
+        inputs: ["", "hello"]
+        expected: 5
+    - case:
+        id: classic_example
+        inputs: ["kitten", "sitting"]
+        expected: 3
+    - case:
+        id: transposition_is_two
+        inputs: ["ab", "ba"]
+        expected: 2
+    - case:
+        id: error_non_string
+        inputs: [123, "abc"]
+        raises: TypeError"""
+
+_EXAMPLE_JSON_ENCODE = """json_encode:
+  evals:
+    IsString:
+      type: str
+    StartsValid:
+      assertion: "len(output) > 0"
+  dataset:
+    - case:
+        id: integer
+        input: 42
+        expected: "42"
+    - case:
+        id: nested_dict
+        input:
+          a: [1, 2]
+        expected: '{"a":[1,2]}'
+    - case:
+        id: inf_error
+        input: .inf
+        raises: ValueError"""
+
+_EXAMPLE_GET_CLOSE_MATCHES = """get_close_matches:
+  evals:
+    ReturnType:
+      type: list
+    AllStrings:
+      assertion: "all(isinstance(x, str) for x in output)"
+  dataset:
+    - case:
+        id: exact_match
+        inputs: ["apple", ["apple", "ape", "banana"], 3, 0.6]
+        expected: ["apple", "ape"]
+    - case:
+        id: no_matches
+        inputs: ["xyz", ["abc", "def"], 3, 0.9]
+        expected: []
+    - case:
+        id: respects_n
+        inputs: ["test", ["test1", "test2", "test3", "test4"], 2, 0.1]
+        assertion: "len(output) == 2"
+"""
+
+
+class EvalsSource(BaseModel):
+    """LLM output model for YAML eval specification."""
+
+    yaml_spec: str = Field(
+        description="Valid vowel-compatible YAML eval specification that thoroughly covers the given function with type checks, property-based assertions, diverse dataset cases, and edge cases including error handling.",
+        examples=[
+            _EXAMPLE_LEVENSHTEIN,
+            _EXAMPLE_JSON_ENCODE,
+            _EXAMPLE_GET_CLOSE_MATCHES,
+        ],
+    )
+
+
+# =============================================================================
+# Fixture Models
+# =============================================================================
+
+FixtureScope = Literal["function", "module", "session"]
+"""Scope for fixture lifecycle.
+
+- function: Setup/teardown for each test case (default)
+- module: Setup once per eval file, teardown after all cases
+- session: Setup once per run_evals call, teardown at end
+"""
+
+
+class FixtureDefinition(BaseModel):
+    """Definition of a single fixture with setup/teardown lifecycle."""
+
+    setup: str | None = Field(
+        default=None,
+        description="Import path to setup function (e.g., 'fixtures.create_db'). Required if 'cls' is not specified.",
+    )
+    cls: str | None = Field(
+        default=None,
+        description="Import path to class (e.g., 'myapp.Database'). Class will be instantiated with args/kwargs.",
+    )
+    args: list[Any] = Field(
+        default_factory=list,
+        description="Positional arguments to pass to class constructor (used with 'cls')",
+    )
+    kwargs: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Keyword arguments to pass to class constructor (used with 'cls')",
+    )
+    teardown: str | None = Field(
+        default=None,
+        description=(
+            "Import path to teardown function (e.g., 'fixtures.drop_db'). "
+            "Can also be a class method (e.g., 'Connection.close') which will be called on the instance."
+        ),
+    )
+    scope: FixtureScope = Field(
+        default="function",
+        description="Lifecycle scope: 'function' (per case), 'module' (per eval), or 'session' (per run)",
+    )
+    params: dict[str, Any] = Field(
+        default_factory=dict, description="Parameters to pass to the setup function"
+    )
+
+    @model_validator(mode="after")
+    def validate_setup_or_cls(self):
+        if not self.setup and not self.cls:
+            raise ValueError("Fixture must have either 'setup' or 'cls' specified")
+        if self.setup and self.cls:
+            raise ValueError("Fixture cannot have both 'setup' and 'cls' specified")
+        return self
+
+
+class FixturesConfig(BaseModel):
+    """Container for all fixture definitions in a YAML file."""
+
+    fixtures: dict[str, FixtureDefinition] = Field(
+        default_factory=dict, description="Map of fixture names to their definitions"
+    )
+
+
+# =============================================================================
+# Evaluation Case Models
+# =============================================================================
 
 
 class IsInstanceCase(BaseModel):
@@ -12,9 +202,12 @@ class IsInstanceCase(BaseModel):
         examples=["int", "str", "bool", "list", "dict", "int | float", "str | None"],
     )
 
-    strict: Optional[bool] = Field(
+    strict: bool | None = Field(
         default=None,
-        description="Whether to use strict mode for type validation. When True, performs stricter type checking.",
+        description=(
+            "Whether to use strict mode for type validation. "
+            "When True, performs stricter type checking."
+        ),
     )
 
     def evaluate(self, output: Any) -> bool:
@@ -22,13 +215,19 @@ class IsInstanceCase(BaseModel):
 
 
 class AssertionCase(BaseModel):
-    """Custom assertion evaluation case. Runs Python expression with 'input' and 'output' variables."""
+    """Custom assertion evaluation case.
+
+    Runs Python expression with 'input' and 'output' variables.
+    """
 
     assertion: str = Field(
         description=(
             "Python expression that returns boolean. Must evaluate to True for test to pass.\n\n"
             "Available variables in assertion context:\n"
             "  - input: The input value(s) passed to the function\n"
+            "    - Single param: input = value\n"
+            "    - Multi param (list): input = [val1, val2, ...]\n"
+            "    - Multi param (dict): input = {key: val, ...}\n"
             "  - output: The actual output returned by the function\n"
             "  - expected: The expected output value from test case (if provided)\n"
             "  - duration: Actual execution time in seconds (float)\n"
@@ -38,7 +237,8 @@ class AssertionCase(BaseModel):
             "  - Type checks: isinstance(output, int), type(output).__name__ == 'str'\n"
             "  - String operations: output.isupper(), len(output) > 0\n"
             "  - Collection operations: all(x > 0 for x in output), len(output) == len(input)\n"
-            "  - Dict access: output['key'] == expected, input['x'] + input['y'] == output\n"
+            "  - Multi-param list: output == input[0] + input[1]\n"
+            "  - Multi-param dict: output == input['x'] * input['y']\n"
             "  - Containment: output in input, 'substring' in output\n"
             "  - Performance: duration < 0.1\n"
             "  - Logic: (output and input > 0) or (not output and input <= 0)"
@@ -111,13 +311,24 @@ class PatternMatchCase(BaseModel):
 
 
 class RaisesCase(BaseModel):
-    """Exception raising evaluation case. Validates that the function raises a specific exception."""
+    """Exception raising evaluation case.
+
+    Validates that the function raises a specific exception.
+    """
 
     raises: str = Field(
-        description="Expected exception type as string (e.g., 'ValueError', 'KeyError', 'TypeError').",
-        examples=["ValueError", "TypeError", "KeyError", "ZeroDivisionError", "IndexError"],
+        description=(
+            "Expected exception type as string (e.g., 'ValueError', 'KeyError', 'TypeError')."
+        ),
+        examples=[
+            "ValueError",
+            "TypeError",
+            "KeyError",
+            "ZeroDivisionError",
+            "IndexError",
+        ],
     )
-    match: Optional[str] = Field(
+    match: str | None = Field(
         default=None,
         description="Optional regex pattern to match against the exception message.",
         examples=["invalid input", "must be positive", "not found"],
@@ -135,19 +346,25 @@ class LLMJudgeCase(BaseModel):
             "Does the response answer the question accurately?",
         ],
     )
-    include: List[str] = Field(
+    include: list[str] = Field(
         default_factory=list,
-        description="List of context variables to include in the evaluation. Valid options: 'input', 'expected_output'.",
+        description=(
+            "List of context variables to include in the evaluation. "
+            "Valid options: 'input', 'expected_output'."
+        ),
         examples=[["input"], ["expected_output"], ["input", "expected_output"]],
     )
-    config: Dict[str, Any] = Field(
+    config: dict[str, Any] = Field(
         default_factory=dict,
-        description="Configuration for the LLM model. 'model' is required unless JUDGE_MODEL env var is set. Other parameters are optional.",
+        description=(
+            "Configuration for the LLM model. "
+            "'model' is required unless JUDGE_MODEL env var is set."
+        ),
     )
 
     @field_validator("include")
     @classmethod
-    def validate_include(cls, v: Optional[List[str]]) -> List[str]:
+    def validate_include(cls, v: list[str] | None) -> list[str]:
         """Validate that include only contains valid options."""
         if v is None:
             return []
@@ -165,7 +382,7 @@ class LLMJudgeCase(BaseModel):
 
     @field_validator("config")
     @classmethod
-    def validate_config(cls, v: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    def validate_config(cls, v: dict[str, Any] | None) -> dict[str, Any]:
         """Validate that model is specified either in config or JUDGE_MODEL env var."""
         if v is None:
             v = {}
@@ -183,21 +400,33 @@ class LLMJudgeCase(BaseModel):
 class MatchCase(BaseModel):
     """Test case with input, expected output, and optional constraints."""
 
-    id: Optional[str] = Field(
+    model_config = ConfigDict(extra="forbid")
+
+    id: str | None = Field(
         default=None,
         description="Optional unique identifier for this test case.",
-        examples=["test_positive_numbers", "edge_case_empty_list", "error_invalid_input"],
+        examples=[
+            "test_positive_numbers",
+            "edge_case_empty_list",
+            "error_invalid_input",
+        ],
     )
-    input: Optional[Any] = Field(
+    input: Any | None = Field(
         default=None,
         description=(
             "Single input value to pass to the function as the only argument. "
             "Use this when the function takes a single argument. "
             "Cannot be used together with 'inputs'."
         ),
-        examples=[5, "hello", [1, 2, 3], {"x": 10, "y": 20}, {"name": "test", "value": 42}],
+        examples=[
+            5,
+            "hello",
+            [1, 2, 3],
+            {"x": 10, "y": 20},
+            {"name": "test", "value": 42},
+        ],
     )
-    inputs: Optional[list | dict] = Field(
+    inputs: list | dict | None = Field(
         default=None,
         description=(
             "Multiple input values to pass to the function as separate arguments (*args). "
@@ -206,55 +435,108 @@ class MatchCase(BaseModel):
         ),
         examples=[[1, 2], [10, 20, 30], ["hello", "world"], [{"x": 1}, {"y": 2}]],
     )
-    expected: Optional[Any] = Field(
-        default=None,
-        description="Expected output value. If provided, output will be compared for equality.",
-        examples=[25, "HELLO", [1, 3, 5], True, {"result": 30}],
+    expected: Any = Field(
+        default=Missing,
+        description="Expected output value. If provided, output will be compared for equality. Use `null` to expect None.",
+        examples=[25, "HELLO", [1, 3, 5], True, {"result": 30}, None],
     )
-    duration: Optional[float] = Field(
+    duration: float | None = Field(
         default=None,
         description="Maximum allowed execution time in milliseconds for this specific case.",
         examples=[100, 500, 1000, 50],
         gt=0,
     )
-    contains: Optional[Any] = Field(
+    contains: Any | None = Field(
         default=None,
         description="Value that should be contained in the output.",
         examples=["substring", 42, "expected_key"],
     )
-    assertion: Optional[str] = Field(
+    assertion: str | None = Field(
         default=None,
         description=(
-            "Optional case-specific Python assertion expression. Same as global assertions but only for this case.\n"
+            "Optional case-specific Python assertion expression. "
+            "Same as global assertions but only for this case.\n"
             "Available variables: input, output, expected, duration, metadata.\n"
             "Examples: 'output > 0', 'len(output) == 3', 'output == input * 2'"
         ),
-        examples=["output > 0", "len(output) == 3", "output % 2 == 0", "output in input"],
+        examples=[
+            "output > 0",
+            "len(output) == 3",
+            "output % 2 == 0",
+            "output in input",
+        ],
     )
-    pattern: Optional[str] = Field(
+    pattern: str | None = Field(
         default=None,
-        description="Optional regex pattern to match against the output (converted to string) for this specific case.",
+        description=(
+            "Optional regex pattern to match against the output "
+            "(converted to string) for this specific case."
+        ),
         examples=[r"^\d+$", r"^[A-Z]+$", r".*@.*\.com$"],
     )
     case_sensitive: bool = Field(
         default=True,
-        description="Whether the regex pattern matching should be case-sensitive (only used if pattern is specified).",
+        description=(
+            "Whether the regex pattern matching should be case-sensitive "
+            "(only used if pattern is specified)."
+        ),
     )
-    raises: Optional[str] = Field(
+    raises: str | None = Field(
         default=None,
-        description="Expected exception type for this case. If specified, the test expects the function to raise this exception.",
-        examples=["ValueError", "TypeError", "KeyError", "ZeroDivisionError"],
+        description=(
+            "Expected exception type for this case. "
+            "If specified, the test expects the function to raise this exception. "
+            "Append '?' for optional raises (e.g., 'TypeError?') — passes if the "
+            "exception is raised OR if the function returns normally."
+        ),
+        examples=["ValueError", "TypeError", "KeyError", "ZeroDivisionError", "TypeError?"],
     )
-    match: Optional[str] = Field(
+    _raises_optional: bool = False  # Internal flag parsed from ? suffix
+    type: str | None = Field(
         default=None,
-        description="Optional regex pattern to match against the exception message (only used if raises is specified).",
+        description=(
+            "Expected output type for this specific case. "
+            "Can be a simple type name or a complex type annotation."
+        ),
+        examples=["int", "str", "list[int]", "dict[str, Any]", "Optional[int]"],
+    )
+    strict_type: bool = Field(
+        default=False,
+        description=(
+            "If True, exact type match is required (no subclasses). "
+            "If False (default), subclasses are allowed."
+        ),
+    )
+    match: str | None = Field(
+        default=None,
+        description=(
+            "Optional regex pattern to match against the exception message "
+            "(only used if raises is specified)."
+        ),
         examples=["invalid input", "must be positive", "not found"],
     )
+
+    @field_validator("raises", mode="before")
+    @classmethod
+    def parse_raises_optional(cls, v):
+        """Strip '?' suffix from raises and set optional flag."""
+        # Handled in model_post_init since we need to set instance attr
+        return v
+
+    def model_post_init(self, __context):
+        """Parse '?' suffix from raises field."""
+        if self.raises is not None and self.raises.endswith("?"):
+            object.__setattr__(self, "_raises_optional", True)
+            self.raises = self.raises[:-1]
 
     @field_validator("match")
     @classmethod
     def validate_match_requires_raises(cls, v, info):
-        if v is not None and info.data.get("raises") is None:
+        raises_val = info.data.get("raises")
+        # Strip ? for validation check
+        if raises_val and raises_val.endswith("?"):
+            raises_val = raises_val[:-1]
+        if v is not None and not raises_val:
             raise ValueError("'match' can only be used together with 'raises'")
         return v
 
@@ -262,18 +544,15 @@ class MatchCase(BaseModel):
     @classmethod
     def validate_input_xor_inputs(cls, v, info):
         """Ensure only one of input or inputs is provided."""
-        if v is not None and info.data.get("input") is not None:
+        input_key_exists = "input" in info.data
+        if v is not None and input_key_exists and info.data.get("input") is not None:
             raise ValueError("Cannot specify both 'input' and 'inputs'. Use only one.")
         return v
 
-    def model_post_init(self, __context):
-        """Validate that at least one of input or inputs is provided."""
-        if self.input is None and self.inputs is None:
-            raise ValueError("Must specify either 'input' or 'inputs'")
-
     @property
     def has_expected(self) -> bool:
-        return self.expected is not None
+        """Check if expected value was explicitly provided (including None/null)."""
+        return self.expected is not Missing
 
     @property
     def has_duration(self) -> bool:
@@ -295,6 +574,15 @@ class MatchCase(BaseModel):
     def has_raises(self) -> bool:
         return self.raises is not None
 
+    @property
+    def raises_optional(self) -> bool:
+        """Whether raises is optional (? suffix was used)."""
+        return self._raises_optional
+
+    @property
+    def has_type(self) -> bool:
+        return self.type is not None
+
 
 class EvalCase(BaseModel):
     """Internal representation of an evaluation case with its data."""
@@ -303,15 +591,18 @@ class EvalCase(BaseModel):
         description="Unique identifier for this evaluation case.",
         examples=["IsInteger", "IsPositive", "TypeCheck", "CorrectLogic"],
     )
-    case_data: Union[
-        IsInstanceCase,
-        AssertionCase,
-        DurationCase,
-        ContainsInputCase,
-        PatternMatchCase,
-        LLMJudgeCase,
-    ] = Field(
-        description="The actual evaluation logic - can be type check, assertion, duration, contains check, pattern match, or LLM judge."
+    case_data: (
+        IsInstanceCase
+        | AssertionCase
+        | DurationCase
+        | ContainsInputCase
+        | PatternMatchCase
+        | LLMJudgeCase
+    ) = Field(
+        description=(
+            "The actual evaluation logic - can be type check, assertion, "
+            "duration, contains check, pattern match, or LLM judge."
+        )
     )
 
     @property
@@ -347,7 +638,7 @@ class DatasetCase(BaseModel):
     )
 
     @property
-    def id(self) -> Optional[str]:
+    def id(self) -> str | None:
         return self.case.id
 
 
@@ -359,25 +650,34 @@ class Evals(BaseModel):
     - Function identifier
     - Global evaluation rules (type checks, assertions, etc.)
     - Test dataset with input/output pairs
+    - Optional fixture dependencies
     """
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     id: str = Field(
         description="Function name to evaluate. Must match the actual function name.",
         examples=["is_prime", "calculate_sum", "process_data", "validate_email"],
     )
 
-    evals: Dict[
+    fixture: list[str] = Field(
+        default_factory=list,
+        description=(
+            "List of fixture names this function depends on. "
+            "Fixtures must be defined in the top-level 'fixtures' section. "
+            "They will be injected as keyword-only arguments to the function."
+        ),
+        examples=[["db"], ["db", "cache"], ["redis"]],
+    )
+
+    evals: dict[
         str,
-        Union[
-            IsInstanceCase,
-            AssertionCase,
-            DurationCase,
-            ContainsInputCase,
-            PatternMatchCase,
-            LLMJudgeCase,
-        ],
+        IsInstanceCase
+        | AssertionCase
+        | DurationCase
+        | ContainsInputCase
+        | PatternMatchCase
+        | LLMJudgeCase,
     ] = Field(
         default_factory=dict,
         description=(
@@ -436,26 +736,60 @@ class Evals(BaseModel):
 class EvalsFile(BaseModel):
     model_config = ConfigDict(extra="allow")
 
+    fixtures: dict[str, FixtureDefinition] = Field(
+        default_factory=dict,
+        description="Global fixture definitions available to all evals in this file",
+    )
+
     @classmethod
     def model_validate(cls, obj, **kwargs):
-        instance = cls.model_construct(**obj)
+        # Parse fixtures if present (don't mutate caller's dict)
+        fixtures_data = obj.get("fixtures", {})
+        obj = {k: v for k, v in obj.items() if k != "fixtures"}
+        fixtures = {}
+        for name, defn in fixtures_data.items():
+            if isinstance(defn, dict):
+                fixtures[name] = FixtureDefinition(**defn)
+            elif isinstance(defn, FixtureDefinition):
+                fixtures[name] = defn
+
+        instance = cls.model_construct(fixtures=fixtures, **obj)
         return instance
 
-    def get_evals(self) -> Dict[str, Evals]:
-        result = {}
-        for key in dir(self):
-            if key.startswith("_"):
-                continue
-            try:
-                value = getattr(self, key)
-                if isinstance(value, dict) and "dataset" in value:
-                    result[key] = Evals(id=key, **value)
-            except:
-                continue
+    # Pydantic internal attributes to skip when iterating
+    _PYDANTIC_INTERNALS = frozenset(
+        {
+            "model_fields",
+            "model_computed_fields",
+            "model_config",
+            "model_extra",
+            "model_fields_set",
+            "model_json_schema",
+            "model_parametrized_name",
+            "model_post_init",
+            "model_rebuild",
+            "model_validate",
+            "model_validate_json",
+            "model_validate_strings",
+            "model_construct",
+            "model_copy",
+            "model_dump",
+            "model_dump_json",
+            "fixtures",
+            # Skip fixtures when iterating evals
+        }
+    )
 
-        if hasattr(self, "__pydantic_extra__"):
-            for key, value in self.__pydantic_extra__.items():
-                if isinstance(value, dict) and "dataset" in value:
+    def get_evals(self) -> dict[str, Evals]:
+        result = {}
+        extras = getattr(self, "__pydantic_extra__", None) or {}
+        for key, value in extras.items():
+            if key == "fixtures":
+                continue
+            if isinstance(value, dict) and "dataset" in value:
+                try:
                     result[key] = Evals(id=key, **value)
+                except Exception as e:
+                    logger.warning(f"Failed to process eval '{key}': {e}")
 
         return result

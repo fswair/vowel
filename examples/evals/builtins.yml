@@ -1,0 +1,55 @@
+# Built-in & standard library functions — no code needed.
+# Run: vowel run examples/evals/builtins.yml
+
+len:
+  dataset:
+    - case: { input: [0], expected: 3 }
+    - case: { input: "hello", expected: 5 }
+    - case: { input: [], expected: 0 }
+
+abs:
+  dataset:
+    - case: { input: -7, expected: 7 }
+    - case: { input: 0, expected: 0 }
+    - case: { input: 42, expected: 42 }
+
+sorted:
+  dataset:
+    - case: { input: [3, 1, 2], expected: [1, 2, 3] }
+    - case: { input: [5, 5, 5], expected: [5, 5, 5] }
+    - case: { input: [], expected: [] }
+
+sum:
+  dataset:
+    - case: { input: [1, 2, 3], expected: 6 }
+    - case: { input: [], expected: 0 }
+
+min:
+  dataset:
+    - case: { input: [3, 1, 2], expected: 1 }
+    - case: { input: [99], expected: 99 }
+
+max:
+  dataset:
+    - case: { input: [3, 1, 2], expected: 3 }
+
+math.sqrt:
+  dataset:
+    - case: { input: 16, expected: 4.0 }
+    - case: { input: 9, expected: 3.0 }
+    - case: { input: 0, expected: 0.0 }
+
+math.factorial:
+  dataset:
+    - case: { input: 0, expected: 1 }
+    - case: { input: 5, expected: 120 }
+    - case: { input: 10, expected: 3628800 }
+
+os.path.join:
+  dataset:
+    - case:
+        inputs: ["/home", "user"]
+        expected: "/home/user"
+    - case:
+        inputs: ["/var", "log", "app.log"]
+        expected: "/var/log/app.log"

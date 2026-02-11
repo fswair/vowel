@@ -1,22 +1,38 @@
-"""
-RunEvals - A fluent API for running evaluations
+"""RunEvals - A fluent API for running evaluations.
+
+This module provides:
+- Function: Pydantic model representing a function with code and metadata
+- RunEvals: Fluent API for loading and running evaluations
+
+Example:
+    # Run from YAML file
+    from vowel import RunEvals
+
+    summary = RunEvals.from_file("evals.yml").run()
+    print(f"All passed: {summary.all_passed}")
+
+    # Run with custom functions
+    def my_func(x):
+        return x * 2
+
+    summary = (
+        RunEvals.from_file("evals.yml")
+        .with_functions({"my_func": my_func})
+        .filter(["my_func"])
+        .debug()
+        .run()
+    )
 """
 
-import os
 import ast
+import codecs
+import contextlib
+import inspect
+import os
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import (
-    Any,
-    TypeVar,
-    Callable,
-    Dict,
-    Generic,
-    List,
-    Optional,
-    Sequence,
-    Union,
-    cast,
-)
+from typing import Any, Generic, TypeVar, cast
+
 from pydantic import BaseModel, Field
 
 from .eval_types import Evals, EvalsFile
@@ -29,14 +45,27 @@ _RT = TypeVar("_RT", bound=Any)
 class Function(BaseModel, Generic[_RT]):
     name: str = Field(description="The name of the function to generate evals for.")
     description: str = Field(description="A brief description of the function's purpose.")
-    code: str = Field(description="The complete implementation code of the function.")
-    file_path: Optional[str] = Field(
+    cases: list[str] = Field(
+        default_factory=list,
+        description="List of unique specialized case scenario descriptions for generating comprehensive test cases for the function to cover edge cases and diverse inputs.",
+        min_length=5,
+    )
+    code: str = Field(
+        description="The complete implementation code of the function with full type annotations. "
+        "Must include type hints for all parameters and return type. "
+        "Use built-in generics (list[int], dict[str, Any]) for Python 3.9+"
+        " or add 'from typing import ...' import if needed."
+    )
+    file_path: str | None = Field(
+        None,
         description="The file path where the function is defined, if applicable.",
         examples=["/path/to/module.py"],
     )
 
-    func: Optional[Any] = Field(
-        default=None, exclude=True, description="The actual function implementation as a callable."
+    func: Any | None = Field(
+        default=None,
+        exclude=True,
+        description="The actual function implementation as a callable.",
     )
 
     @property
@@ -44,7 +73,7 @@ class Function(BaseModel, Generic[_RT]):
         return self.name
 
     @property
-    def impl(self) -> Callable:
+    def impl(self) -> Callable[..., _RT]:
         """
         Get the function implementation as a callable.
 
@@ -55,12 +84,29 @@ class Function(BaseModel, Generic[_RT]):
             self.execute()
         return cast(Callable, self.func)
 
-    def execute(self):
-        local_scope = {}
+    def execute(self) -> None:
+        """Execute the function code and store the callable.
+
+        Raises:
+            RuntimeError: If the code cannot be executed.
+        """
+        if self.func:
+            return
+
+        local_scope: dict[str, object] = {}
         try:
-            exec(self.code, local_scope, local_scope)
+            code = self.code
+            try:
+                exec(code, local_scope, local_scope)
+            except Exception:
+                if "\\n" in code or '\\"' in code or "\\'" in code:
+                    code = codecs.decode(code, "unicode_escape")
+                    exec(code, local_scope, local_scope)
+                else:
+                    raise
+
         except Exception as e:
-            raise e from RuntimeError(f"Error executing code for function '{self.name}'.")
+            raise RuntimeError(f"Error executing code for function '{self.name}'.") from e
 
         self.func = local_scope[self.name]
 
@@ -78,7 +124,6 @@ class Function(BaseModel, Generic[_RT]):
     @property
     def func_path(self) -> str:
         if self.file_path:
-
             file_path = Path(self.file_path).resolve()
             current_dir = Path(os.getcwd()).resolve()
 
@@ -92,6 +137,70 @@ class Function(BaseModel, Generic[_RT]):
             except ValueError:
                 return f"{file_path.stem}.{self.name}"
         return self.name
+
+    @staticmethod
+    def from_callable(func: Callable[..., _RT]) -> "Function[_RT]":
+        """
+        Create a Function instance from a callable.
+
+        Args:
+            func: The callable to wrap.
+
+        Returns:
+            Function[_RT]: The created Function instance.
+        """
+        name = getattr(func, "__name__", "unknown")
+        description = getattr(func, "__doc__", None) or "No description provided."
+        try:
+            source = inspect.getsource(func)
+        except Exception as e:
+            raise RuntimeError(f"Could not retrieve source code for function '{name}'.") from e
+
+        file_path = inspect.getfile(func)
+
+        return Function(
+            name=name, description=description, code=source, file_path=file_path, func=func
+        )
+
+    def print(self, *, theme: str = "monokai", show_description: bool = True) -> None:
+        """Pretty print the function with syntax highlighting.
+
+        Args:
+            theme: Syntax highlighting theme (monokai, dracula, github-dark, etc.)
+            show_description: Whether to show the function description
+        """
+        try:
+            from rich.console import Console
+            from rich.panel import Panel
+            from rich.syntax import Syntax
+        except ImportError:
+            self._print_simple(show_description=show_description)
+            return
+
+        console = Console()
+
+        subtitle = (
+            f"[dim]{self.description[:80]}{'...' if len(self.description) > 80 else ''}[/dim]"
+            if show_description
+            else None
+        )
+
+        console.print(
+            Panel(
+                Syntax(self.code, "python", theme=theme, line_numbers=True),
+                title=f"[green]🐍 {self.name}[/green]",
+                subtitle=subtitle,
+            )
+        )
+
+    def _print_simple(self, *, show_description: bool = True) -> None:
+        """Fallback simple print without rich library."""
+        print(f"\n{'=' * 60}")
+        print(f"🐍 {self.name}")
+        if show_description:
+            print(f"   {self.description}")
+        print("=" * 60)
+        print(self.code)
 
 
 class RunEvals:
@@ -108,19 +217,27 @@ class RunEvals:
 
     def __init__(
         self,
-        source: Union[str, Path, dict, EvalsFile, Evals, Sequence[Evals]],
+        source: str | Path | dict | EvalsFile | Evals | Sequence[Evals],
         *,
-        functions: Optional[Dict[str, Callable]] = None,
-        filter_funcs: Optional[List[str]] = None,
+        functions: dict[str, Callable] | None = None,
+        filter_funcs: list[str] | None = None,
         debug_mode: bool = False,
+        schema: dict[str, type | Callable | dict[str, type | Callable]] | None = None,
+        serial_fn: dict[str, Callable[[dict], Any]] | None = None,
+        fixtures: dict[str, Callable | tuple[Callable, Callable | None]] | None = None,
+        ignore_duration: bool = False,
     ):
         self._source = source
         self._functions = functions or {}
         self._filter_funcs = filter_funcs or []
         self._debug_mode = debug_mode
+        self._schema = schema or {}
+        self._serial_fn = serial_fn or {}
+        self._fixtures = fixtures or {}
+        self._ignore_duration = ignore_duration
 
     @classmethod
-    def from_file(cls, path: Union[str, Path]) -> "RunEvals":
+    def from_file(cls, path: str | Path) -> "RunEvals":
         """
         Create from a YAML file path.
 
@@ -136,7 +253,7 @@ class RunEvals:
         return cls(str(path))
 
     @classmethod
-    def from_source(cls, source: Union[str, dict, EvalsFile]) -> "RunEvals":
+    def from_source(cls, source: str | dict | EvalsFile) -> "RunEvals":
         """
         Create from a YAML string, dict, or EvalsFile object.
 
@@ -155,9 +272,9 @@ class RunEvals:
     @classmethod
     def from_evals(
         cls,
-        evals: Union[Evals, Sequence[Evals]],
+        evals: Evals | Sequence[Evals],
         *,
-        functions: Optional[Dict[str, Callable]] = None,
+        functions: dict[str, Callable] | None = None,
     ) -> "RunEvals":
         """
         Create from one or more Evals objects.
@@ -176,18 +293,16 @@ class RunEvals:
         if isinstance(evals, Evals):
             for i, case in enumerate(evals.dataset):
                 if case.case.input is not None and isinstance(case.case.input, str):
-                    try:
+                    with contextlib.suppress(ValueError, SyntaxError):
                         evals.dataset[i].case.input = ast.literal_eval(case.case.input)
-                    except (ValueError, SyntaxError):
-                        pass
 
                 if case.case.inputs is not None:
                     for j, inp in enumerate(case.case.inputs):
                         if isinstance(inp, str):
-                            try:
-                                evals.dataset[i].case.inputs[j] = ast.literal_eval(inp)
-                            except (ValueError, SyntaxError):
-                                pass
+                            with contextlib.suppress(ValueError, SyntaxError):
+                                inputs = evals.dataset[i].case.inputs
+                                if inputs is not None and not isinstance(inputs, dict):
+                                    inputs[j] = ast.literal_eval(inp)  # type: ignore[index]
 
             source_dict = {evals.id: evals.model_dump(exclude={"id"})}
         else:
@@ -216,7 +331,7 @@ class RunEvals:
         """
         return cls(data)
 
-    def with_functions(self, functions: Dict[str, Callable]) -> "RunEvals":
+    def with_functions(self, functions: dict[str, Callable]) -> "RunEvals":
         """
         Add or update functions to use for evaluation.
 
@@ -232,7 +347,7 @@ class RunEvals:
         self._functions.update(functions)
         return self
 
-    def filter(self, func_names: Union[str, List[str]]) -> "RunEvals":
+    def filter(self, func_names: str | list[str]) -> "RunEvals":
         """
         Filter to only evaluate specific functions.
 
@@ -266,6 +381,104 @@ class RunEvals:
         self._debug_mode = enabled
         return self
 
+    def with_serializer(
+        self,
+        schema: dict[str, type | Callable | dict[str, type | Callable]] | None = None,
+        *,
+        serial_fn: dict[str, Callable[[dict], Any]] | None = None,
+    ) -> "RunEvals":
+        """
+        Add input serializers to transform inputs before passing to functions.
+
+        Two modes:
+        1. schema: Type/callable applied to each input automatically
+        2. serial_fn: Full control - receives raw {input:..} or {inputs:..} dict
+
+        Args:
+            schema: Dict mapping function names to types/callables.
+                - Single type: Applied to single input or all inputs
+                - Dict of types: Applied to specific named parameters
+            serial_fn: Dict mapping function names to functions that receive
+                the raw input dict and return serialized value(s).
+                Signature: fn(input_dict: dict) -> Any
+
+        Returns:
+            Self for chaining
+
+        Examples:
+            # Mode 1: Auto serialization with type
+            class User(BaseModel):
+                name: str
+                age: int
+
+            RunEvals.from_file("evals.yml").with_serializer({
+                "greet": User  # User(**input) called automatically
+            }).run()
+
+            # Mode 2: Full control with serial_fn
+            def serialize_user(d: dict) -> User:
+                data = d.get("input") or d.get("inputs")
+                return User(**data)
+
+            RunEvals.from_file("evals.yml").with_serializer(
+                serial_fn={"greet": serialize_user}
+            ).run()
+        """
+        if schema:
+            self._schema.update(schema)
+        if serial_fn:
+            self._serial_fn.update(serial_fn)
+        return self
+
+    def with_fixtures(
+        self,
+        fixtures: dict[str, Callable | tuple[Callable, Callable | None]],
+    ) -> "RunEvals":
+        """
+        Add fixture functions for dependency injection.
+
+        Fixtures are injected as keyword-only arguments to eval functions.
+        In YAML, just specify fixture names; provide actual functions here.
+
+        Args:
+            fixtures: Dict mapping fixture names to:
+                - Callable: Setup function (no teardown)
+                - Tuple[Callable, Callable | None]: (setup_fn, teardown_fn)
+
+        Returns:
+            Self for chaining
+
+        Examples:
+            # Simple fixture (setup only)
+            def create_db():
+                return {"connected": True, "host": "localhost"}
+
+            RunEvals.from_file("evals.yml").with_fixtures({
+                "db": create_db
+            }).run()
+
+            # Fixture with teardown
+            def create_db():
+                db = connect_to_db()
+                return db
+
+            def close_db(db):
+                db.close()
+
+            RunEvals.from_file("evals.yml").with_fixtures({
+                "db": (create_db, close_db)
+            }).run()
+
+            # YAML file:
+            # my_func:
+            #   fixture:
+            #     - db
+            #   dataset:
+            #     - case: {input: {x: 1}, expected_output: 2}
+        """
+        self._fixtures.update(fixtures)
+        return self
+
     def run(self) -> EvalSummary:
         """
         Execute the evaluations.
@@ -277,14 +490,26 @@ class RunEvals:
             summary = RunEvals.from_file("evals.yml").run()
             print(f"Passed: {summary.all_passed}")
         """
-        kwargs = {
-            "debug": self._debug_mode,
-        }
+        return _run_evals(
+            self._source,  # type: ignore[arg-type]
+            filter_funcs=self._filter_funcs,
+            functions=self._functions,
+            debug=self._debug_mode,
+            schema=self._schema,
+            serial_fn=self._serial_fn,
+            fixtures=self._fixtures,
+            ignore_duration=self._ignore_duration,
+        )
 
-        if self._filter_funcs:
-            kwargs["filter_funcs"] = self._filter_funcs
+    def ignore_duration(self) -> "RunEvals":
+        """
+        Ignore duration constraints during evaluation.
 
-        if self._functions:
-            kwargs["functions"] = self._functions
+        Returns:
+            Self for chaining
 
-        return _run_evals(self._source, **kwargs)
+        Example:
+            summary = RunEvals.from_file("evals.yml").ignore_duration().run()
+        """
+        self._ignore_duration = True
+        return self

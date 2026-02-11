@@ -1,0 +1,62 @@
+# Validation & parsing functions with pattern + raises evaluators.
+# Run: vowel run examples/evals/validation.yml
+
+examples.evals.functions.validate_email:
+  evals:
+    IsBool:
+      type: bool
+      strict: true
+  dataset:
+    - case: { input: "user@example.com", expected: true }
+    - case: { input: "invalid.email", expected: false }
+    - case: { input: "test@domain.co.uk", expected: true }
+    - case: { input: "@nodomain.com", expected: false }
+    - case: { input: "spaces @mail.com", expected: false }
+
+examples.evals.functions.classify_age_group:
+  evals:
+    IsString:
+      type: str
+    ValidCategory:
+      pattern: "^(child|teenager|adult|senior)$"
+    LogicalRanges:
+      assertion: |
+        (input < 13 and output == 'child') or\
+        (13 <= input < 18 and output == 'teenager') or\
+        (18 <= input < 65 and output == 'adult') or\
+        (input >= 65 and output == 'senior')
+  dataset:
+    - case: { input: 5, expected: "child" }
+    - case: { input: 15, expected: "teenager" }
+    - case: { input: 30, expected: "adult" }
+    - case: { input: 70, expected: "senior" }
+    - case: { input: 12, expected: "child" }
+    - case: { input: 18, expected: "adult" }
+    - case: { input: 65, expected: "senior" }
+
+examples.evals.functions.format_phone:
+  evals:
+    PhoneFormat:
+      pattern: "^\\(\\d{3}\\) \\d{3}-\\d{4}$"
+  dataset:
+    - case: { input: "5551234567", expected: "(555) 123-4567" }
+    - case: { input: "2129876543", expected: "(212) 987-6543" }
+    - case:
+        input: "123"
+        raises: ValueError
+        match: "10 digits"
+
+examples.evals.functions.parse_json:
+  evals:
+    IsDict:
+      type: dict
+  dataset:
+    - case:
+        input: '{"key": "value", "n": 42}'
+        expected: { key: "value", n: 42 }
+    - case:
+        input: "invalid json"
+        expected: {}
+    - case:
+        input: '{"nested": {"ok": true}}'
+        expected: { nested: { ok: true } }

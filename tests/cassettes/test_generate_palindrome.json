@@ -1,0 +1,11 @@
+{
+  "242af25b76a2fa73": {
+    "prompt_preview": "generate_function",
+    "model": "openrouter:google/gemini-3-flash-preview",
+    "response": {
+      "name": "is_palindrome",
+      "description": "Checks if a string is a palindrome, ignoring case and spaces. Returns True for palindromes, False otherwise. Raises TypeError for non-string inputs.",
+      "code": "def is_palindrome(text: str) -> bool:\n    \"\"\"\n    Checks if a string is a palindrome.\n    Case-insensitive and ignores spaces.\n    \n    Args:\n        text: The string to check.\n        \n    Returns:\n        True if the string is a palindrome, False otherwise.\n    \"\"\"\n    if not isinstance(text, str):\n        raise TypeError(\"Input must be a string\")\n        \n    # Remove spaces and convert to lowercase\n    cleaned = \"\".join(text.split()).lower()\n    \n    # Compare with its reverse\n    return cleaned == cleaned[::-1]\n"
+    }
+  }
+}
