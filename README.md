@@ -122,7 +122,7 @@ factorial:
     - case: { input: 5, expected: 120 }
 ```
 
-> **Full reference:** [docs/EVALUATORS.md](docs/EVALUATORS.md)
+> **Full reference:** [docs/EVALUATORS.md](https://github.com/fswair/vowel/blob/main/docs/EVALUATORS.md)
 
 ### Fixtures (Dependency Injection)
 
@@ -148,7 +148,7 @@ def query_user(user_id: int, *, db: dict) -> dict | None:
     return db["users"].get(user_id)
 ```
 
-> **Full reference:** [docs/FIXTURES.md](docs/FIXTURES.md)
+> **Full reference:** [docs/FIXTURES.md](https://github.com/fswair/vowel/blob/main/docs/FIXTURES.md)
 
 ### Input Serializers
 
@@ -163,7 +163,7 @@ summary = (
 )
 ```
 
-> **Full reference:** [docs/SERIALIZERS.md](docs/SERIALIZERS.md)
+> **Full reference:** [docs/SERIALIZERS.md](https://github.com/fswair/vowel/blob/main/docs/SERIALIZERS.md)
 
 ### AI-Powered Generation
 
@@ -203,13 +203,13 @@ func = generator.generate_implementation(signature, yaml_spec)
 summary = runner.with_functions({"factorial": func.impl}).run()
 ```
 
-> **Full reference:** [docs/AI_GENERATION.md](docs/AI_GENERATION.md)
+> **Full reference:** [docs/AI_GENERATION.md](https://github.com/fswair/vowel/blob/main/docs/AI_GENERATION.md)
 
 ### MCP Server
 
 Expose vowel's capabilities to AI assistants like Claude Desktop via Model Context Protocol.
 
-> **Setup guide:** [docs/MCP.md](docs/MCP.md)
+> **Setup guide:** [docs/MCP.md](https://github.com/fswair/vowel/blob/main/docs/MCP.md)
 
 ---
 
@@ -225,7 +225,7 @@ vowel evals.yml --dry-run                # Show plan without running
 vowel evals.yml --export-json out.json   # Export results
 ```
 
-> **Full reference:** [docs/CLI.md](docs/CLI.md)
+> **Full reference:** [docs/CLI.md](https://github.com/fswair/vowel/blob/main/docs/CLI.md)
 
 ---
 
@@ -253,14 +253,14 @@ summary.xml()                  # Export as XML
 
 | Document | Description |
 |----------|-------------|
-| [YAML Spec](docs/YAML_SPEC.md) | Complete YAML format reference |
-| [Evaluators](docs/EVALUATORS.md) | All 8 evaluator types |
-| [Fixtures](docs/FIXTURES.md) | Dependency injection guide |
-| [Serializers](docs/SERIALIZERS.md) | Input serializer patterns |
-| [AI Generation](docs/AI_GENERATION.md) | EvalGenerator & TDDGenerator |
-| [CLI](docs/CLI.md) | Command-line reference |
-| [MCP Server](docs/MCP.md) | AI assistant integration |
-| [Troubleshooting](docs/TROUBLESHOOTING.md) | Common errors & solutions |
+| [YAML Spec](https://github.com/fswair/vowel/blob/main/docs/YAML_SPEC.md) | Complete YAML format reference |
+| [Evaluators](https://github.com/fswair/vowel/blob/main/docs/EVALUATORS.md) | All 8 evaluator types |
+| [Fixtures](https://github.com/fswair/vowel/blob/main/docs/FIXTURES.md) | Dependency injection guide |
+| [Serializers](https://github.com/fswair/vowel/blob/main/docs/SERIALIZERS.md) | Input serializer patterns |
+| [AI Generation](https://github.com/fswair/vowel/blob/main/docs/AI_GENERATION.md) | EvalGenerator & TDDGenerator |
+| [CLI](https://github.com/fswair/vowel/blob/main/docs/CLI.md) | Command-line reference |
+| [MCP Server](https://github.com/fswair/vowel/blob/main/docs/MCP.md) | AI assistant integration |
+| [Troubleshooting](https://github.com/fswair/vowel/blob/main/docs/TROUBLESHOOTING.md) | Common errors & solutions |
 
 ---
 
