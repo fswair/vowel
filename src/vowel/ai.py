@@ -167,9 +167,11 @@ class GenerationResult(BaseModel):
             summary_table.add_row("Coverage", f"{self.summary.coverage * 100:.1f}%")
             summary_table.add_row(
                 "Status",
-                "[green]✅ ALL PASSED[/green]"
-                if self.summary.all_passed
-                else "[red]❌ FAILURES[/red]",
+                (
+                    "[green]✅ ALL PASSED[/green]"
+                    if self.summary.all_passed
+                    else "[red]❌ FAILURES[/red]"
+                ),
             )
             summary_table.add_row(
                 "Was Healed", "[yellow]🔧 Yes[/yellow]" if self.was_healed else "No"

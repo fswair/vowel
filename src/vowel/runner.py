@@ -39,6 +39,7 @@ from .eval_types import Evals, EvalsFile
 from .utils import EvalSummary
 from .utils import run_evals as _run_evals
 
+_T = TypeVar("_T", bound=Any)
 _RT = TypeVar("_RT", bound=Any)
 
 
@@ -139,7 +140,7 @@ class Function(BaseModel, Generic[_RT]):
         return self.name
 
     @staticmethod
-    def from_callable(func: Callable[..., _RT]) -> "Function[_RT]":
+    def from_callable(func: Callable[..., _T]) -> "Function[_T]":
         """
         Create a Function instance from a callable.
 
@@ -202,6 +203,17 @@ class Function(BaseModel, Generic[_RT]):
         print("=" * 60)
         print(self.code)
 
+    def __eq__(self, fn):
+        """
+        Compare this Function's implementation with another callable.
+
+        Args:
+            fn: A callable or Function instance to compare against.
+
+        Returns:
+            bool: True if the provided callable is the same as this Function's implementation.
+        """
+        return fn == self.impl
 
 class RunEvals:
     """
