@@ -9,7 +9,7 @@ Catches common LLM generation mistakes BEFORE the spec is used:
 Usage:
     from vowel.validation import validate_and_fix_spec
 
-    fixed_yaml, warnings = validate_and_fix_spec(yaml_str, function_code="def foo(x): ...")
+    fixed_yaml, warnings = validate_and_fix_spec(yaml_spec, function_code="def foo(x): ...")
 """
 
 import re
@@ -236,7 +236,7 @@ def _check_raises_in_code(raises_type: str, function_code: str) -> bool:
 
 
 def validate_and_fix_spec(
-    yaml_str: str,
+    yaml_spec: str,
     *,
     function_code: str | None = None,
 ) -> ValidationResult:
@@ -248,16 +248,16 @@ def validate_and_fix_spec(
     3. Warns about suspicious raises cases
 
     Args:
-        yaml_str: The YAML eval spec string
+        yaml_spec: The YAML eval spec string
         function_code: Optional function source code for raises validation
 
     Returns:
         ValidationResult with fixed YAML and warnings
     """
-    result = ValidationResult(original_yaml=yaml_str, fixed_yaml=yaml_str)
+    result = ValidationResult(original_yaml=yaml_spec, fixed_yaml=yaml_spec)
 
     try:
-        data = yaml.safe_load(yaml_str)
+        data = yaml.safe_load(yaml_spec)
     except yaml.YAMLError:
         # If YAML can't parse, nothing we can do
         return result

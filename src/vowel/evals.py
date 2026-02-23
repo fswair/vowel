@@ -20,23 +20,16 @@ import logging
 import os
 import re
 import typing
+from contextlib import suppress
 from dataclasses import dataclass
 
-import dotenv
+import pydantic_monty
 from pydantic import ValidationError
 from pydantic.type_adapter import TypeAdapter
 from pydantic_ai.settings import ModelSettings
 from pydantic_evals.evaluators import EvaluationReason, Evaluator, EvaluatorContext, LLMJudge
 
-from .monitoring import enable_monitoring
-
 logger = logging.getLogger(__name__)
-
-dotenv.load_dotenv()
-
-# ── Logfire Monitoring & Observability ──
-
-enable_monitoring(service_name="vowel")
 
 
 def prepare_env_and_condition(ctx: EvaluatorContext, condition: str) -> tuple[dict, str]:
@@ -85,6 +78,11 @@ class AssertionEvaluator(Evaluator):
     def __init__(self, condition: str, *, evaluation_name: str = "Assertion"):
         self.condition = condition
         self.evaluation_name = evaluation_name
+        self.interpreter = pydantic_monty.Monty(
+            condition,
+            script_name="assertion.py",
+            inputs=["input", "output", "expected", "metrics", "metadata", "duration"],
+        )
 
     def evaluate(self, ctx: EvaluatorContext) -> EvaluationReason:
         """Evaluate the assertion condition against the context."""
@@ -93,14 +91,36 @@ class AssertionEvaluator(Evaluator):
         if "__import__" in self.condition:
             raise ValueError(f"__import__ is not allowed in assertions: {self.condition}")
         env, condition = prepare_env_and_condition(ctx, self.condition)
-        if eval(self.condition, env, env):
-            return EvaluationReason(
-                value=True, reason=f"Assertion passed for condition: {condition}"
-            )
-        else:
-            return EvaluationReason(
-                value=False, reason=f"Assertion failed for condition: {condition}"
-            )
+
+        # TL;DR
+        # BETA API
+
+        return self.eval_python(condition, env)
+
+        # CURRENT API
+        # if eval(self.condition, env, env):
+        #     return EvaluationReason(
+        #         value=True, reason=f"Assertion passed for condition: {condition}"
+        #     )
+        # else:
+        #     return EvaluationReason(
+        #         value=False, reason=f"Assertion failed for condition: {condition}"
+        #     )
+
+    def eval_python(self, condition: str, inputs: dict) -> EvaluationReason:
+        try:
+            if self.interpreter.run(inputs=inputs):
+                return EvaluationReason(
+                    value=True, reason=f"Assertion passed for condition: {condition}"
+                )
+        except Exception:
+            with suppress(Exception):
+                if eval(self.condition, inputs, inputs):
+                    return EvaluationReason(
+                        value=True, reason=f"Assertion passed for condition: {condition}"
+                    )
+
+        return EvaluationReason(value=False, reason=f"Assertion failed for condition: {condition}")
 
 
 @dataclass

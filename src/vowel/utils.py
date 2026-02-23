@@ -45,6 +45,7 @@ from pydantic_evals import Case, Dataset
 from pydantic_evals.evaluators import Contains, EqualsExpected, Evaluator, MaxDuration
 from pydantic_evals.reporting import EvaluationReport
 
+from .errors import FixturePathError, SignatureError
 from .eval_types import Evals, EvalsFile, FixtureDefinition
 from .evals import (
     AssertionEvaluator,
@@ -497,12 +498,6 @@ def unpack_inputs(
 # =============================================================================
 
 
-class FixtureSignatureError(Exception):
-    """Raised when a function signature doesn't comply with fixture requirements."""
-
-    pass
-
-
 def validate_fixture_signature(
     func: Callable[..., Any],
     fixture_names: list[str],
@@ -520,7 +515,7 @@ def validate_fixture_signature(
         fixture_names: List of fixture names this function uses
 
     Raises:
-        FixtureSignatureError: If signature doesn't comply
+        SignatureError: If signature doesn't comply
 
     Examples:
         # ✅ Valid signatures:
@@ -540,14 +535,14 @@ def validate_fixture_signature(
     func_name = getattr(func, "__name__", "<unknown>")
 
     # Check for *args or **kwargs
-    for _name, param in params.items():
+    for param in params.values():
         if param.kind == inspect.Parameter.VAR_POSITIONAL:
-            raise FixtureSignatureError(
+            raise SignatureError(
                 f"Function '{func_name}' has *args which is not allowed with fixtures. "
                 f"Function signature must be deterministic."
             )
         if param.kind == inspect.Parameter.VAR_KEYWORD:
-            raise FixtureSignatureError(
+            raise SignatureError(
                 f"Function '{func_name}' has **kwargs which is not allowed with fixtures. "
                 f"Function signature must be deterministic."
             )
@@ -560,13 +555,13 @@ def validate_fixture_signature(
     # Check that all fixtures are keyword-only
     for fixture_name in fixture_names:
         if fixture_name not in params:
-            raise FixtureSignatureError(
+            raise SignatureError(
                 f"Function '{func_name}' uses fixture '{fixture_name}' but doesn't have "
                 f"a parameter with that name. Add '*, {fixture_name}: Any' to the signature."
             )
 
         if fixture_name not in keyword_only_params:
-            raise FixtureSignatureError(
+            raise SignatureError(
                 f"Function '{func_name}' has fixture '{fixture_name}' as a positional parameter. "
                 f"Fixtures must be keyword-only arguments (after *). "
                 f"Change signature to: def {func_name}(..., *, {fixture_name}: Any)"
@@ -676,14 +671,16 @@ class FixtureManager:
 
         # Call setup function - check if generator (pytest-style yield fixtures)
         try:
+            call_args = defn.args if fixture_name not in self._fixture_funcs else []
+            call_kwargs = defn.kwargs if fixture_name not in self._fixture_funcs else {}
             if teardown_func is None and inspect.isgeneratorfunction(setup_func):
                 # Generator fixture: extract yielded value, store generator for cleanup
-                gen = setup_func(**defn.params) if defn.params else setup_func()
+                gen = setup_func(*call_args, **call_kwargs)
                 instance = next(gen)
                 self._generators[fixture_name] = gen
             else:
                 # Normal fixture (tuple API or plain function)
-                instance = setup_func(**defn.params) if defn.params else setup_func()
+                instance = setup_func(*call_args, **call_kwargs)
         except Exception as e:
             raise RuntimeError(f"Failed to setup fixture '{fixture_name}': {e}") from e
 
@@ -749,7 +746,25 @@ class FixtureManager:
                 teardown_func = None
 
             if teardown_func:
-                teardown_func(instance)
+                sig = inspect.signature(teardown_func)
+                required_params = [
+                    p
+                    for p in sig.parameters.values()
+                    if p.kind
+                    not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+                    and p.default is inspect.Parameter.empty
+                ]
+                if len(required_params) == 0:
+                    teardown_func()
+                elif len(required_params) == 1:
+                    teardown_func(instance)
+                else:
+                    raise SignatureError(
+                        f"Teardown function for fixture '{fixture_name}' has "
+                        f"{len(required_params)} required parameters. "
+                        f"Teardown must accept either no parameters or exactly one "
+                        f"(the fixture instance)."
+                    )
 
     def teardown_all(self, scope: str) -> None:
         """Teardown all fixtures of a given scope."""
@@ -1128,9 +1143,70 @@ def to_dataset(
     return Dataset(name=name, cases=dataset_cases, evaluators=global_evaluators)
 
 
+def _validate_fixtures_not_in_calling_module(
+    merged_fixtures: dict[str, FixtureDefinition],
+    fixture_funcs: dict[str, tuple[Callable, Callable | None]],
+) -> None:
+    """
+    Raise a clear error if any fixture's import path points to the __main__ module.
+
+    When a fixture is defined in the same script that calls .run(), importing that
+    module causes the script to be re-executed. This results in a nested evaluation:
+
+        RuntimeError: A task run has already been entered. Task runs should not be nested.
+
+    This only applies to FixtureDefinition with string import paths (setup/cls/teardown).
+    Callable fixtures passed via with_fixtures({"db": fn}) are safe.
+
+    Args:
+        merged_fixtures: All resolved fixture definitions
+        fixture_funcs: Programmatic callable fixtures (these are always safe)
+
+    Raises:
+        vowel.errors.SignatureError: If a fixture import path resolves to __main__
+    """
+    import sys
+
+    main_module = sys.modules.get("__main__")
+    if main_module is None:
+        return
+
+    main_file = getattr(main_module, "__file__", None)
+    if main_file is None:
+        return
+
+    main_file = os.path.abspath(main_file)
+    # Derive the module name from __main__'s file (e.g. /path/ds.py → "ds")
+    main_module_stem = os.path.splitext(os.path.basename(main_file))[0]
+
+    for fixture_name, defn in merged_fixtures.items():
+        # Callable fixtures are safe — they don't trigger an import
+        if fixture_name in fixture_funcs:
+            continue
+
+        # Check setup and cls paths
+        for path_attr, path_value in [("setup", defn.setup), ("cls", defn.cls)]:
+            if not path_value or path_value.startswith("__programmatic__"):
+                continue
+
+            # Extract the top-level module name from the import path
+            module_part = path_value.split(".")[0]
+
+            if module_part == main_module_stem:
+                setup_fn_name = path_value.split(".", 1)[-1]
+                raise FixturePathError(
+                    f"Fixture '{fixture_name}' ({path_attr}='{path_value}') points to the "
+                    f"calling module — importing it would re-execute the script and cause a "
+                    f"nested evaluation run. Pass the callable directly instead: "
+                    f".with_fixtures({{'{fixture_name}': {setup_fn_name}}})"
+                )
+
+
 def _merge_programmatic_fixtures(
     yaml_fixtures: dict[str, FixtureDefinition],
-    programmatic_fixtures: dict[str, Callable | tuple[Callable, Callable | None]] | None,
+    programmatic_fixtures: (
+        dict[str, Callable | tuple[Callable, Callable | None] | FixtureDefinition] | None
+    ),
 ) -> tuple[dict[str, FixtureDefinition], dict[str, tuple[Callable, Callable | None]]]:
     """
     Merge programmatic fixtures with YAML fixtures.
@@ -1139,7 +1215,7 @@ def _merge_programmatic_fixtures(
 
     Args:
         yaml_fixtures: Fixtures defined in YAML
-        programmatic_fixtures: Fixtures provided as callables
+        programmatic_fixtures: Fixtures provided as callables or FixtureDefinition objects
 
     Returns:
         Tuple of (merged_fixtures, fixture_funcs)
@@ -1149,6 +1225,11 @@ def _merge_programmatic_fixtures(
 
     if programmatic_fixtures:
         for name, fixture_spec in programmatic_fixtures.items():
+            # FixtureDefinition passed directly — use as-is (import paths, args, scope, etc.)
+            if isinstance(fixture_spec, FixtureDefinition):
+                merged_fixtures[name] = fixture_spec
+                continue
+
             if isinstance(fixture_spec, tuple):
                 setup_fn, teardown_fn = fixture_spec
             else:
@@ -1183,9 +1264,10 @@ def _import_and_detect_class_method(
     if functions and eval_id in functions:
         func = functions[eval_id]
         # Check if bound method (exclude builtin functions where __self__ is the module)
-        if hasattr(func, "__self__") and not isinstance(func.__self__, types.ModuleType):
-            class_name = func.__self__.__class__.__name__
-            class_path = f"{func.__self__.__class__.__module__}.{class_name}"
+        self_obj = getattr(func, "__self__", None)
+        if self_obj is not None and not isinstance(self_obj, types.ModuleType):
+            class_name = self_obj.__class__.__name__
+            class_path = f"{self_obj.__class__.__module__}.{class_name}"
             return func, class_path, class_name
         else:
             return func, None, None
@@ -1482,6 +1564,8 @@ def _evaluate_single_function(
 
     except (ImportError, AttributeError) as e:
         return EvalResult(eval_id, error=e)
+    except SignatureError:
+        raise
     except Exception as e:
         return EvalResult(eval_id, error=e)
 
@@ -1898,7 +1982,9 @@ def run_evals(
     debug: bool = False,
     schema: dict[str, type | Callable | dict[str, type | Callable]] | None = None,
     serial_fn: dict[str, Callable[[dict], Any]] | None = None,
-    fixtures: dict[str, Callable | tuple[Callable, Callable | None]] | None = None,
+    fixtures: (
+        dict[str, Callable | tuple[Callable, Callable | None] | FixtureDefinition] | None
+    ) = None,
     ignore_duration: bool = False,
 ) -> EvalSummary:
     """
@@ -1924,6 +2010,9 @@ def run_evals(
 
     # Merge programmatic fixtures with YAML fixtures
     merged_fixtures, fixture_funcs = _merge_programmatic_fixtures(yaml_fixtures, fixtures)
+
+    # Guard: raise early if any fixture import path points to __main__
+    _validate_fixtures_not_in_calling_module(merged_fixtures, fixture_funcs)
 
     schema = schema or {}
     serial_fn = serial_fn or {}
@@ -1957,6 +2046,8 @@ def run_evals(
                     ignore_duration,
                 )
                 results.append(result)
+            except SignatureError:
+                raise
             except Exception as e:
                 if debug:
                     raise

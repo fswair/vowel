@@ -159,7 +159,7 @@ def run_evals_with_fixtures(
         if fixtures:
             fixture_objects = {}
             for name, code in fixtures.items():
-                local_ns: dict[str, Any] = {}
+                local_ns = {}
                 exec(code, {}, local_ns)
                 # Look for setup function or use the first callable found
                 if "setup" in local_ns:
@@ -331,15 +331,11 @@ def generate_eval_spec(
         )
 
         generator = EvalGenerator(model=model, additional_context=additional_context)
-        runner = generator.generate_spec(func, save_to_file=False)
+        _, yaml_spec = generator.generate_spec(func, save_to_file=False)
 
         return {
             "function_name": function_name,
-            "yaml_spec": (
-                runner._source
-                if hasattr(runner, "_source") and isinstance(runner._source, str)
-                else "Generated successfully"
-            ),
+            "yaml_spec": yaml_spec,
             "message": "Eval spec generated. Use run_evals_from_yaml to execute.",
         }
     except Exception as e:

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vowel"
-version = "0.3.1"
+version = "0.3.2"
 description = "A modular evaluation framework for testing functions with YAML-based specifications"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,6 +32,7 @@ dependencies = [
     "pydantic>=2.0.0",
     "pydantic-ai>=1.0.0",
     "pydantic-evals>=1.0.0",
+    "pydantic-monty>=0.0.7",
     "rich",
 ]
 
@@ -44,6 +45,7 @@ dev = [
     "ruff>=0.1.0",
     "mypy>=1.0.0",
     "types-pyyaml",
+    "basedpyright>=1.0.0",
 ]
 mcp = [
     "mcp",
@@ -77,6 +79,7 @@ target-version = ["py311"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+exclude = ["vowel-optimization"]
 
 [tool.ruff.lint]
 select = [
@@ -108,6 +111,9 @@ ignore_missing_imports = true
 [tool.ty]
 [tool.ty.environment]
 python-version = "3.11"
+
+[tool.ty.src]
+exclude = ["vowel-optimization"]
 
 [tool.ty.rules]
 unresolved-import = "ignore"

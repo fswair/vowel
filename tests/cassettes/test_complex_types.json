@@ -5,5 +5,12 @@
     "response": {
       "yaml_spec": "sum_list:\n  evals:\n    IsInteger:\n      type: int\n    NonNegativeForPositives:\n      assertion: \"output >= 0 if all(x >= 0 for x in input) else True\"\n    ExecutionSpeed:\n      duration: 0.001\n  dataset:\n    - case:\n        id: typical_list\n        input: [1, 2, 3, 4, 5]\n        expected: 15\n    \n    - case:\n        id: empty_list\n        input: []\n        expected: 0\n    \n    - case:\n        id: single_element\n        input: [42]\n        expected: 42\n\n    - case:\n        id: negative_numbers\n        input: [-1, -5, 10]\n        expected: 4\n\n    - case:\n        id: large_numbers\n        input: [1000000, 2000000]\n        expected: 3000000\n\n    - case:\n        id: all_zeros\n        input: [0, 0, 0]\n        expected: 0\n\n    - case:\n        id: large_range\n        input: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]\n        expected: 55\n\n    - case:\n        id: invalid_input_none\n        input: null\n        raises: TypeError\n\n    - case:\n        id: invalid_list_contents\n        input: [1, \"2\", 3]\n        raises: TypeError\n"
     }
+  },
+  "029ddf9bf77815af": {
+    "prompt_preview": "generate_spec",
+    "model": "google-vertex:gemini-3-flash-preview",
+    "response": {
+      "yaml_spec": "sum_list:\n  evals:\n    ReturnType:\n      type: int\n    CorrectSum:\n      assertion: output == sum(input)\n    FastExecution:\n      duration: 0.001\n  dataset:\n  - case:\n      id: empty_list\n      input: []\n      expected: 0\n  - case:\n      id: single_element\n      input:\n      - 42\n      expected: 42\n  - case:\n      id: positive_integers\n      input:\n      - 1\n      - 2\n      - 3\n      - 4\n      - 5\n      - 6\n      - 7\n      - 8\n      - 9\n      - 10\n      expected: 55\n  - case:\n      id: negative_integers\n      input:\n      - -1\n      - -2\n      - -3\n      - -4\n      - -5\n      expected: -15\n  - case:\n      id: mixed_integers\n      input:\n      - -100\n      - 50\n      - 25\n      - -25\n      - 100\n      expected: 50\n  - case:\n      id: large_integers\n      input:\n      - 1000000\n      - 2000000\n      - 3000000\n      expected: 6000000\n  - case:\n      id: zeroes\n      input:\n      - 0\n      - 0\n      - 0\n      - 0\n      expected: 0\n"
+    }
   }
 }

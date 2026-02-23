@@ -112,7 +112,7 @@ fixtures:
     setup: fixtures.setup_db
     teardown: fixtures.close_db
     scope: module
-    params:              # Optional parameters for setup
+    kwargs:              # Optional keyword arguments for setup
       db_name: test_db
 
   temp_file:

@@ -41,9 +41,12 @@ from pydantic_ai import Agent, format_as_xml
 
 from vowel.context import EVAL_SPEC_CONTEXT
 from vowel.eval_types import EvalsSource
+from vowel.monitoring import enable_monitoring
 from vowel.runner import Function, RunEvals
 from vowel.utils import EvalSummary, check_compatibility, import_function
 from vowel.validation import validate_and_fix_spec
+
+enable_monitoring(service_name="vowel-ai")
 
 
 class UnsupportedParameterTypeError(Exception):

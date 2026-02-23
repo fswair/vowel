@@ -11,7 +11,7 @@ fixtures:
     setup: module.setup_func      # Import path to setup function
     teardown: module.teardown_func # Import path to teardown (optional)
     scope: function                # function | module | session
-    params:                        # Parameters for setup function (optional)
+    kwargs:                        # Keyword arguments for setup function (optional)
       key: value
 
 # Function evaluation specs

@@ -27,9 +27,6 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.experimental.missing_sentinel import MISSING
 
-# Re-export MISSING as Missing for cleaner API
-Missing = MISSING
-
 logger = logging.getLogger(__name__)
 
 
@@ -151,11 +148,11 @@ class FixtureDefinition(BaseModel):
     )
     args: list[Any] = Field(
         default_factory=list,
-        description="Positional arguments to pass to class constructor (used with 'cls')",
+        description="Positional arguments unpacked into the callable: setup_func(*args) or MyClass(*args)",
     )
     kwargs: dict[str, Any] = Field(
         default_factory=dict,
-        description="Keyword arguments to pass to class constructor (used with 'cls')",
+        description="Keyword arguments unpacked into the callable: setup_func(**kwargs) or MyClass(**kwargs)",
     )
     teardown: str | None = Field(
         default=None,
@@ -167,9 +164,6 @@ class FixtureDefinition(BaseModel):
     scope: FixtureScope = Field(
         default="function",
         description="Lifecycle scope: 'function' (per case), 'module' (per eval), or 'session' (per run)",
-    )
-    params: dict[str, Any] = Field(
-        default_factory=dict, description="Parameters to pass to the setup function"
     )
 
     @model_validator(mode="after")
@@ -436,7 +430,7 @@ class MatchCase(BaseModel):
         examples=[[1, 2], [10, 20, 30], ["hello", "world"], [{"x": 1}, {"y": 2}]],
     )
     expected: Any = Field(
-        default=Missing,
+        default=MISSING,
         description="Expected output value. If provided, output will be compared for equality. Use `null` to expect None.",
         examples=[25, "HELLO", [1, 3, 5], True, {"result": 30}, None],
     )
@@ -526,7 +520,7 @@ class MatchCase(BaseModel):
     def model_post_init(self, __context):
         """Parse '?' suffix from raises field."""
         if self.raises is not None and self.raises.endswith("?"):
-            object.__setattr__(self, "_raises_optional", True)
+            self._raises_optional = True
             self.raises = self.raises[:-1]
 
     @field_validator("match")
@@ -552,7 +546,7 @@ class MatchCase(BaseModel):
     @property
     def has_expected(self) -> bool:
         """Check if expected value was explicitly provided (including None/null)."""
-        return self.expected is not Missing
+        return self.expected is not MISSING
 
     @property
     def has_duration(self) -> bool:

@@ -43,7 +43,6 @@ from vowel.validation import validate_and_fix_spec
 dotenv.load_dotenv()
 
 # ── Logfire Monitoring & Observability ──
-
 enable_monitoring(service_name="vowel-tdd")
 
 
@@ -703,6 +702,9 @@ Generate a complete FunctionSignature with:
             Tuple of (RunEvals runner, yaml_spec string)
         """
         last_failure_context: str | None = None
+        summary: EvalSummary | None = None
+        runner: RunEvals | None = None
+        yaml_spec: str = ""
 
         for attempt in range(max_retries + 1):
             with logfire.span(
@@ -785,6 +787,8 @@ IMPORTANT: In assertions, use `input[0]`, `input[1]` to access positional args.
                     time.sleep(retry_delay)
 
         # Exhausted retries — return last generated spec
+        # (summary/runner/yaml_spec are always set when func is not None and loop ran at least once)
+        assert summary is not None and runner is not None  # noqa: S101
         logfire.warn(
             "Eval generation exhausted retries",
             final_coverage=f"{summary.coverage * 100:.0f}%",
@@ -882,13 +886,12 @@ Requirements:
             TDDResult with signature, yaml_spec, func, and summary
         """
 
+        # Step 1: Generate signature once (not regenerated on flow retries)
+        logfire.info("Step 1: Generating signature")
+        signature = self.generate_signature(description, name, is_async)
+
         for flow_attempt in range(max_flow_retries + 1):
             with logfire.span("TDD generation flow", name=name, flow_attempt=flow_attempt + 1):
-                # Step 1: Generate signature (only on first attempt)
-                if flow_attempt == 0:
-                    logfire.info("Step 1: Generating signature")
-                    signature = self.generate_signature(description, name, is_async)
-
                 # Step 2: Generate evals
                 logfire.info("Step 2: Generating evals", flow_attempt=flow_attempt + 1)
                 runner, yaml_spec = self.generate_evals_from_signature(
@@ -900,6 +903,7 @@ Requirements:
                 # Step 3: Generate implementation (with retries)
                 logfire.info("Step 3: Generating implementation")
 
+                summary: EvalSummary | None = None
                 for impl_attempt in range(max_impl_retries + 1):
                     func = self.generate_implementation(signature, yaml_spec, additional_context)
 
@@ -949,6 +953,7 @@ Requirements:
 
                 # All impl attempts failed, retry entire flow if allowed
                 if flow_attempt < max_flow_retries:
+                    assert summary is not None  # noqa: S101  # always set after inner loop ran
                     logfire.warn(
                         "All implementation attempts failed, regenerating evals",
                         flow_attempt=flow_attempt + 1,

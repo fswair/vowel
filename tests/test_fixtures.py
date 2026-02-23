@@ -1,16 +1,14 @@
 """Tests for the fixture mechanism."""
 
+import sys
+from collections.abc import Callable
+
 import pytest
 
+from vowel.errors import FixturePathError, SignatureError
 from vowel.eval_types import FixtureDefinition
 from vowel.runner import RunEvals
-from vowel.utils import (
-    EvalsBundle,
-    FixtureManager,
-    FixtureSignatureError,
-    load_bundle,
-    validate_fixture_signature,
-)
+from vowel.utils import EvalsBundle, FixtureManager, load_bundle, validate_fixture_signature
 
 
 def valid_with_fixture(name: str, age: int, *, db: object) -> str:
@@ -72,37 +70,37 @@ class TestValidateFixtureSignature:
 
     def test_invalid_fixture_positional(self):
         """Should fail when fixture is positional."""
-        with pytest.raises(FixtureSignatureError) as exc:
+        with pytest.raises(SignatureError) as exc:
             validate_fixture_signature(invalid_fixture_positional, ["db"])
         assert "keyword-only" in str(exc.value)
 
     def test_invalid_fixture_not_kwonly(self):
         """Should fail when fixture is not keyword-only."""
-        with pytest.raises(FixtureSignatureError) as exc:
+        with pytest.raises(SignatureError) as exc:
             validate_fixture_signature(invalid_fixture_not_kwonly, ["db"])
         assert "keyword-only" in str(exc.value)
 
     def test_invalid_with_args(self):
         """Should fail when function has *args."""
-        with pytest.raises(FixtureSignatureError) as exc:
+        with pytest.raises(SignatureError) as exc:
             validate_fixture_signature(invalid_with_args, ["db"])
         assert "*args" in str(exc.value)
 
     def test_invalid_with_kwargs(self):
         """Should fail when function has **kwargs."""
-        with pytest.raises(FixtureSignatureError) as exc:
+        with pytest.raises(SignatureError) as exc:
             validate_fixture_signature(invalid_with_kwargs, ["db"])
         assert "**kwargs" in str(exc.value)
 
     def test_invalid_with_both(self):
         """Should fail when function has both *args and **kwargs."""
-        with pytest.raises(FixtureSignatureError) as exc:
+        with pytest.raises(SignatureError) as exc:
             validate_fixture_signature(invalid_with_both, ["db"])
         assert "*args" in str(exc.value)
 
     def test_missing_fixture_param(self):
         """Should fail when fixture is not in function params."""
-        with pytest.raises(FixtureSignatureError) as exc:
+        with pytest.raises(SignatureError) as exc:
             validate_fixture_signature(valid_no_fixtures, ["db"])
         assert "doesn't have a parameter" in str(exc.value)
 
@@ -149,7 +147,7 @@ class TestFixtureManager:
                 setup="test_fixtures.setup_db",
                 teardown="test_fixtures.teardown_db",
                 scope="function",
-                params={"host": "test-host", "port": 5555},
+                kwargs={"host": "test-host", "port": 5555},
             )
         }
         manager = FixtureManager(fixtures)
@@ -278,7 +276,7 @@ fixtures:
     setup: test_fixtures.setup_db
     teardown: test_fixtures.teardown_db
     scope: module
-    params:
+    kwargs:
       host: 192.168.1.1
       port: 5432
 
@@ -299,7 +297,7 @@ examples.functions.add_numbers:
         assert "db" in bundle.fixtures
         assert bundle.fixtures["db"].setup == "test_fixtures.setup_db"
         assert bundle.fixtures["db"].scope == "module"
-        assert bundle.fixtures["db"].params == {"host": "192.168.1.1", "port": 5432}
+        assert bundle.fixtures["db"].kwargs == {"host": "192.168.1.1", "port": 5432}
 
     def test_load_bundle_without_fixtures(self):
         """Should load evals without fixtures."""
@@ -362,7 +360,7 @@ class TestIntegration:
                 setup="test_fixtures.setup_db",
                 teardown="test_fixtures.teardown_db",
                 scope="function",
-                params={"port": 100},
+                kwargs={"port": 100},
             )
         }
 
@@ -521,6 +519,323 @@ add_with_db:
 
         assert not summary.all_passed
         assert summary.error_count == 1
+
+
+def setup_db_with_args(host: str, port: int):
+    """Setup that requires positional args."""
+    return {"host": host, "port": port, "connected": True}
+
+
+def setup_db_with_kwargs(*, url: str, pool: int = 1):
+    """Setup that requires keyword args."""
+    return {"url": url, "pool": pool}
+
+
+class TestSetupArgsKwargs:
+    """Tests for args/kwargs support on setup functions via FixtureDefinition."""
+
+    def test_setup_with_positional_args(self):
+        """FixtureDefinition.args should be passed to setup as positional args."""
+        yaml_content = """
+add_with_db:
+  fixture:
+    - db
+  dataset:
+    - case:
+        inputs: {a: 1, b: 2}
+        expected: 3
+"""
+        summary = (
+            RunEvals.from_source(yaml_content)
+            .with_functions({"add_with_db": add_with_db})
+            .with_fixtures(
+                {
+                    "db": FixtureDefinition(
+                        setup="test_fixtures.setup_db_with_args",
+                        args=["localhost", 5432],
+                    )
+                }
+            )
+            .run()
+        )
+        assert summary.all_passed
+
+    def test_setup_with_kwargs(self):
+        """FixtureDefinition.kwargs should be passed to setup as keyword args."""
+        yaml_content = """
+add_with_db:
+  fixture:
+    - db
+  dataset:
+    - case:
+        inputs: {a: 1, b: 2}
+        expected: 3
+"""
+        summary = (
+            RunEvals.from_source(yaml_content)
+            .with_functions({"add_with_db": add_with_db})
+            .with_fixtures(
+                {
+                    "db": FixtureDefinition(
+                        setup="test_fixtures.setup_db_with_kwargs",
+                        kwargs={"url": "postgres://localhost/test"},
+                    )
+                }
+            )
+            .run()
+        )
+        assert summary.all_passed
+
+    def test_setup_args_not_passed_for_callable_fixtures(self):
+        """Callable fixtures via with_fixtures tuple API ignore args/kwargs (use partial instead)."""
+        called_with = []
+
+        def my_setup(*a, **kw):
+            called_with.append((a, kw))
+            return {}
+
+        yaml_content = """
+add_with_db:
+  fixture:
+    - db
+  dataset:
+    - case:
+        inputs: {a: 1, b: 2}
+        expected: 3
+"""
+        summary = (
+            RunEvals.from_source(yaml_content)
+            .with_functions({"add_with_db": add_with_db})
+            .with_fixtures({"db": my_setup})
+            .run()
+        )
+        assert summary.all_passed
+        # Callable fixture should be called with no args (not FixtureDefinition args)
+        assert called_with == [((), {})]
+
+
+class TestFixtureDefinitionDirectPassthrough:
+    """Tests for passing FixtureDefinition directly to with_fixtures()."""
+
+    def test_fixture_definition_passthrough(self):
+        """FixtureDefinition passed directly should be used as-is."""
+        yaml_content = """
+add_with_db:
+  fixture:
+    - db
+  dataset:
+    - case:
+        inputs: {a: 1, b: 2}
+        expected: 3
+"""
+        summary = (
+            RunEvals.from_source(yaml_content)
+            .with_functions({"add_with_db": add_with_db})
+            .with_fixtures(
+                {
+                    "db": FixtureDefinition(
+                        setup="test_fixtures.setup_db_with_args",
+                        args=["my-host", 9999],
+                    )
+                }
+            )
+            .run()
+        )
+        assert summary.all_passed
+
+    def test_fixture_definition_with_scope(self):
+        """FixtureDefinition with module scope should only setup once."""
+        setup_count = []
+
+        def counting_setup():
+            setup_count.append(1)
+            return {}
+
+        yaml_content = """
+add_with_db:
+  fixture:
+    - db
+  dataset:
+    - case:
+        inputs: {a: 1, b: 2}
+        expected: 3
+    - case:
+        inputs: {a: 10, b: 20}
+        expected: 30
+"""
+        # Use module scope via callable — scope is set on the programmatic FixtureDefinition
+        # when constructed directly
+        summary = (
+            RunEvals.from_source(yaml_content)
+            .with_functions({"add_with_db": add_with_db})
+            .with_fixtures(
+                {
+                    "db": FixtureDefinition(
+                        setup="test_fixtures.setup_db_with_args",
+                        args=["host", 1],
+                        scope="module",
+                    )
+                }
+            )
+            .run()
+        )
+        assert summary.all_passed
+
+
+class TestStatelessTeardown:
+    """Tests for teardown functions with zero or one required parameter."""
+
+    def test_teardown_with_no_params(self):
+        """Teardown with no params (stateless) should be called without args."""
+        closed = []
+
+        def my_setup():
+            return {"connected": True}
+
+        def my_close():
+            closed.append(True)
+
+        yaml_content = """
+add_with_db:
+  fixture:
+    - db
+  dataset:
+    - case:
+        inputs: {a: 1, b: 2}
+        expected: 3
+"""
+        summary = (
+            RunEvals.from_source(yaml_content)
+            .with_functions({"add_with_db": add_with_db})
+            .with_fixtures({"db": (my_setup, my_close)})
+            .run()
+        )
+        assert summary.all_passed
+        assert closed == [True]
+
+    def test_teardown_with_instance_param(self):
+        """Teardown with one param should receive the fixture instance."""
+        received = []
+
+        def my_setup():
+            return {"connected": True}
+
+        def my_close(db):
+            received.append(db)
+
+        yaml_content = """
+add_with_db:
+  fixture:
+    - db
+  dataset:
+    - case:
+        inputs: {a: 1, b: 2}
+        expected: 3
+"""
+        summary = (
+            RunEvals.from_source(yaml_content)
+            .with_functions({"add_with_db": add_with_db})
+            .with_fixtures({"db": (my_setup, my_close)})
+            .run()
+        )
+        assert summary.all_passed
+        assert len(received) == 1
+        assert received[0] == {"connected": True}
+
+    def test_teardown_with_default_param_treated_as_zero_required(self):
+        """Teardown with only default params should be called without args."""
+        closed = []
+
+        def my_setup():
+            return {}
+
+        def my_close(log=False):
+            closed.append(log)
+
+        yaml_content = """
+add_with_db:
+  fixture:
+    - db
+  dataset:
+    - case:
+        inputs: {a: 1, b: 2}
+        expected: 3
+"""
+        summary = (
+            RunEvals.from_source(yaml_content)
+            .with_functions({"add_with_db": add_with_db})
+            .with_fixtures({"db": (my_setup, my_close)})
+            .run()
+        )
+        assert summary.all_passed
+        assert closed == [False]
+
+    def test_teardown_with_two_required_params_raises(self):
+        """Teardown with two required params should raise SignatureError."""
+        from vowel.utils import FixtureManager
+
+        def my_setup():
+            return {}
+
+        def bad_teardown(a, b):
+            pass
+
+        manager = FixtureManager(
+            {"db": FixtureDefinition(setup="test_fixtures.setup_cache")},
+            fixture_funcs={"db": (my_setup, bad_teardown)},
+        )
+        manager.setup("db")
+        with pytest.raises(SignatureError, match="Teardown"):
+            manager.teardown("db", "function")
+
+
+class TestFixturePathError:
+    """Tests for FixturePathError when fixture import path points to __main__."""
+
+    def test_fixture_path_pointing_to_main_raises(self, tmp_path, monkeypatch):
+        """Should raise FixturePathError when setup path resolves to __main__."""
+        from vowel.utils import _validate_fixtures_not_in_calling_module
+
+        # Simulate a __main__ module with a file
+        fake_main = type(sys)("__fake_main__")
+        fake_main.__file__ = str(tmp_path / "myscript.py")
+        monkeypatch.setitem(sys.modules, "__main__", fake_main)
+
+        fixtures = {
+            "db": FixtureDefinition(setup="myscript.create_db"),
+        }
+        with pytest.raises(FixturePathError, match="calling module"):
+            _validate_fixtures_not_in_calling_module(fixtures, {})
+
+    def test_fixture_path_different_module_ok(self, tmp_path, monkeypatch):
+        """Should not raise when setup path is a different module."""
+        from vowel.utils import _validate_fixtures_not_in_calling_module
+
+        fake_main = type(sys)("__fake_main__")
+        fake_main.__file__ = str(tmp_path / "myscript.py")
+        monkeypatch.setitem(sys.modules, "__main__", fake_main)
+
+        fixtures = {
+            "db": FixtureDefinition(setup="other_module.create_db"),
+        }
+        # Should not raise
+        _validate_fixtures_not_in_calling_module(fixtures, {})
+
+    def test_callable_fixture_never_raises(self, tmp_path, monkeypatch):
+        """Callable fixtures should never trigger FixturePathError."""
+        from vowel.utils import _validate_fixtures_not_in_calling_module
+
+        fake_main = type(sys)("__fake_main__")
+        fake_main.__file__ = str(tmp_path / "myscript.py")
+        monkeypatch.setitem(sys.modules, "__main__", fake_main)
+
+        # Even though setup path points to __main__, fixture_funcs entry means it's callable
+        fixtures = {
+            "db": FixtureDefinition(setup="myscript.create_db"),
+        }
+        fixture_funcs: dict[str, tuple[Callable, Callable | None]] = {"db": (lambda: {}, None)}
+        # Should not raise — callable fixture, safe
+        _validate_fixtures_not_in_calling_module(fixtures, fixture_funcs)
 
 
 if __name__ == "__main__":

@@ -1,8 +1,19 @@
+BLUE := \033[1;34m
+GREEN := \033[1;32m
+RESET := \033[0m
+
 format:
-	@echo "Formatting code with ruff..."
+	@printf "$(BLUE)==>$(RESET) Formatting code with ruff...\n"
 	@ruff format
-	@echo "Running ruff checks and fixing issues..."
+	@printf "$(GREEN)✔ Formatting complete.$(RESET)\n"
+
+check:
+	@printf "$(BLUE)==>$(RESET) Running ruff checks and fixing issues...\n"
 	@ruff check --fix --unsafe-fixes
-	@echo "Type checking with ty..."
+	@printf "$(BLUE)==>$(RESET) Type checking with ty...\n"
 	@ty check
-	@echo "Formatting complete."
+	@printf "$(BLUE)==>$(RESET) Type checking with basedpyright...\n"
+	@basedpyright
+	@printf "$(GREEN)✔ Checking complete.$(RESET)\n"
+
+all: format check

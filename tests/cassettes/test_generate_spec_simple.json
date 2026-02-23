@@ -6,5 +6,13 @@
       "yaml_spec": "add_numbers:\n  evals:\n    IsInteger:\n      type: int\n    CorrectSum:\n      assertion: \"output == input[0] + input[1]\"\n    NonNegativeOnlyIfInputsAre:\n      assertion: \"not (input[0] > 0 and input[1] > 0) or output > 0\"\n    FastCalculation:\n      duration: 0.001\n\n  dataset:\n    - case:\n        id: positive_numbers\n        inputs: [10, 20]\n        expected: 30\n\n    - case:\n        id: negative_numbers\n        inputs: [-5, -15]\n        expected: -20\n\n    - case:\n        id: mixed_signs\n        inputs: [-10, 25]\n        expected: 15\n\n    - case:\n        id: zero_identity\n        inputs: [0, 500]\n        expected: 500\n\n    - case:\n        id: large_integers\n        inputs: [1000000, 2000000]\n        expected: 3000000\n\n    - case:\n        id: invalid_type_float\n        inputs: [1.5, 2]\n        raises: TypeError\n\n    - case:\n        id: invalid_type_string\n        inputs: [\"1\", 2]\n        raises: TypeError\n",
       "func_name": "add_numbers"
     }
+  },
+  "029ddf9bf77815af": {
+    "prompt_preview": "generate_spec",
+    "model": "google-vertex:gemini-3-flash-preview",
+    "response": {
+      "yaml_spec": "add_numbers:\n  evals:\n    ReturnTypeInt:\n      type: int\n    CorrectSumProperty:\n      assertion: \"output == input[0] + input[1]\"\n  dataset:\n    - case:\n        id: positive_integers\n        inputs: [15, 27]\n        expected: 42\n    - case:\n        id: zero_identity\n        inputs: [0, 100]\n        expected: 100\n    - case:\n        id: both_negative\n        inputs: [-10, -25]\n        expected: -35\n    - case:\n        id: mixed_signs\n        inputs: [-50, 75]\n        expected: 25\n    - case:\n        id: large_integers\n        inputs: [1000000000, 2000000000]\n        expected: 3000000000\n    - case:\n        id: error_none_input\n        inputs: [null, 10]\n        raises: TypeError\n    - case:\n        id: error_string_input\n        inputs: [5, \"10\"]\n        raises: TypeError\n",
+      "func_name": "add_numbers"
+    }
   }
 }

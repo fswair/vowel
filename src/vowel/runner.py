@@ -35,7 +35,7 @@ from typing import Any, Generic, TypeVar, cast
 
 from pydantic import BaseModel, Field
 
-from .eval_types import Evals, EvalsFile
+from .eval_types import Evals, EvalsFile, FixtureDefinition
 from .utils import EvalSummary
 from .utils import run_evals as _run_evals
 
@@ -70,7 +70,7 @@ class Function(BaseModel, Generic[_RT]):
     )
 
     @property
-    def __name__(self) -> str:
+    def __name__(self) -> str:  # pyright: ignore[reportIncompatibleVariableOverride]
         return self.name
 
     @property
@@ -215,6 +215,7 @@ class Function(BaseModel, Generic[_RT]):
         """
         return fn == self.impl
 
+
 class RunEvals:
     """
     Fluent API for running evaluations.
@@ -223,7 +224,7 @@ class RunEvals:
         RunEvals.from_file("evals.yml").run()
         RunEvals.from_evals(evals_obj, functions={"func": func}).run()
         RunEvals.from_evals([evals1, evals2], functions={...}).run()
-        RunEvals.from_source(yaml_str).run()
+        RunEvals.from_source(yaml_spec).run()
         RunEvals.from_file("evals.yml").filter(["func1", "func2"]).debug().run()
     """
 
@@ -236,7 +237,9 @@ class RunEvals:
         debug_mode: bool = False,
         schema: dict[str, type | Callable | dict[str, type | Callable]] | None = None,
         serial_fn: dict[str, Callable[[dict], Any]] | None = None,
-        fixtures: dict[str, Callable | tuple[Callable, Callable | None]] | None = None,
+        fixtures: (
+            dict[str, Callable | tuple[Callable, Callable | None] | FixtureDefinition] | None
+        ) = None,
         ignore_duration: bool = False,
     ):
         self._source = source
@@ -276,8 +279,8 @@ class RunEvals:
             RunEvals instance
 
         Example:
-            yaml_str = "func: {evals: {...}, dataset: [...]}"
-            RunEvals.from_source(yaml_str).run()
+            yaml_spec = "func: {evals: {...}, dataset: [...]}"
+            RunEvals.from_source(yaml_spec).run()
         """
         return cls(source)
 
@@ -444,7 +447,7 @@ class RunEvals:
 
     def with_fixtures(
         self,
-        fixtures: dict[str, Callable | tuple[Callable, Callable | None]],
+        fixtures: dict[str, Callable | tuple[Callable, Callable | None] | FixtureDefinition],
     ) -> "RunEvals":
         """
         Add fixture functions for dependency injection.

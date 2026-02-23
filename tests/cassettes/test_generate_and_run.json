@@ -7,5 +7,14 @@
       "was_healed": false,
       "coverage": 0.0
     }
+  },
+  "9558b80955e7f650": {
+    "prompt_preview": "generate_and_run",
+    "model": "google-vertex:gemini-3-flash-preview",
+    "response": {
+      "yaml_spec": "double:\n  evals:\n    ReturnType:\n      type: int\n    MathematicalCorrectness:\n      assertion: output == input * 2\n  dataset:\n  - case:\n      id: positive_integer\n      input: 21\n      expected: 42\n  - case:\n      id: negative_integer\n      input: -15\n      expected: -30\n  - case:\n      id: zero_value\n      input: 0\n      expected: 0\n  - case:\n      id: large_integer\n      input: 123456789\n      expected: 246913578\n  - case:\n      id: large_negative\n      input: -5000000\n      expected: -10000000\n  - case:\n      id: float_input\n      input: 10.5\n      expected: 21.0\n      type: float\n",
+      "was_healed": false,
+      "coverage": 1.0
+    }
   }
 }

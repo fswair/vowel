@@ -1,0 +1,21 @@
+{
+  "pythonVersion": "3.11",
+  "typeCheckingMode": "standard",
+  "exclude": [
+    "vowel-optimization",
+    "tmp",
+    "**/.*"
+  ],
+  "reportMissingModuleSource": "none",
+  "reportFunctionMemberAccess": "none",
+  "reportUnknownVariableType": "none",
+  "reportUnknownMemberType": "none",
+  "reportUnknownParameterType": "none",
+  "reportAny": "none",
+  "reportExplicitAny": "none",
+  "reportMissingParameterType": "none",
+  "reportUnannotatedClassAttribute": "none",
+  "reportImplicitStringConcatenation": "none",
+  "reportMissingImports": "none",
+  "reportCallIssue": "none"
+}

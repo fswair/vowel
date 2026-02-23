@@ -13,18 +13,24 @@ def enable_monitoring(
 ):
     dotenv.load_dotenv()
     logfire_enabled = logfire_enabled or os.getenv("LOGFIRE_ENABLED")
-    condition = (
+    available = (
         logfire_enabled
         and isinstance(logfire_enabled, bool)
         or str(logfire_enabled).lower() == "true"
     )
 
-    if condition:
+    if available:
         if importlib.util.find_spec("logfire"):
             import logfire
 
-            logfire.configure(**options)
+            console = options.pop(
+                "console",
+                logfire.ConsoleOptions(show_project_link=False),
+            )
+
+            logfire.configure(**options, console=console)
             logfire.instrument_pydantic_ai()
+
             if instrument_httpx:
                 logfire.instrument_httpx(capture_all=httpx_capture_all)
         else:

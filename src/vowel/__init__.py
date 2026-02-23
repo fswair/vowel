@@ -33,6 +33,7 @@ __version__ = importlib.metadata.version("vowel")
 
 from .ai import EvalGenerator, GenerationResult, UnsupportedParameterTypeError
 from .context import EVAL_SPEC_CONTEXT
+from .errors import FixturePathError, SignatureError
 from .eval_types import EvalsFile
 from .runner import Function, RunEvals
 from .utils import (
@@ -67,6 +68,8 @@ __all__ = [
     "Function",
     "EVAL_SPEC_CONTEXT",
     "UnsupportedParameterTypeError",
+    "SignatureError",
+    "FixturePathError",
     "check_compatibility",
     "get_unsupported_params",
     "is_yaml_serializable_type",

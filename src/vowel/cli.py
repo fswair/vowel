@@ -31,12 +31,13 @@ def find_yaml_files(directory: Path) -> list[Path]:
 def validate_coverage(ctx, param, value):
     """Validate coverage is between 0 and 100."""
     new_value = max(1, min(100, value))
-    click.secho(
-        f"WARNING: Coverage expected to be in range between 1 and 100 but {int(value) if value == int(value) else value} found, defaulting to {new_value}.",
-        fg="yellow",
-        err=True,
-    )
-    return value
+    if new_value != value:
+        click.secho(
+            f"WARNING: Coverage expected to be in range between 1 and 100 but {int(value) if value == int(value) else value} found, defaulting to {new_value}.",
+            fg="yellow",
+            err=True,
+        )
+    return new_value
 
 
 # ── Top-level group ───────────────────────────────────────────────
@@ -333,7 +334,7 @@ def run(
                 if now - self.last_run < 1.0:
                     return
                 self.last_run = now
-                console.print(f"\n[cyan]Changed: {Path(event.src_path).name}[/cyan]")
+                console.print(f"\n[cyan]Changed: {Path(event.src_path).name}[/cyan]")  # type: ignore
                 console.print("[dim]─[/dim]" * 40)
                 run_once()
 
