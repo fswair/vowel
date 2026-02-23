@@ -40,13 +40,13 @@ jobs:
           source venv/bin/activate
           ruff check src/vowel
 
-      - name: ty check
-        run: |
-          source venv/bin/activate
-          ty check src/vowel
-
-      # TODO: fix pyrightconfig.json and re-enable this.
-      # - name: basedpyright
+      # disabled for now
+      # - name: ty check
       #   run: |
       #     source venv/bin/activate
-      #     basedpyright 
+      #     ty check src/vowel
+
+      - name: basedpyright
+        run: |
+          source venv/bin/activate
+          basedpyright 
