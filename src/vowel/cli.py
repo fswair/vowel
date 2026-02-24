@@ -40,21 +40,10 @@ def validate_coverage(ctx, param, value):
     return new_value
 
 
-# ── Top-level group ───────────────────────────────────────────────
+# ── Main command ─────────────────────────────────────────────────
 
 
-@click.group(invoke_without_command=True)
-@click.pass_context
-def main(ctx):
-    """vowel — YAML-based evaluation framework for Python functions."""
-    if ctx.invoked_subcommand is None:
-        click.echo(ctx.get_help())
-
-
-# ── vowel run ─────────────────────────────────────────────────────
-
-
-@main.command()
+@click.command()
 @click.argument("yaml_file", type=click.Path(exists=True, path_type=Path), required=False)
 @click.option("--ci", is_flag=True, help="Enable CI mode")
 @click.option(
@@ -82,7 +71,7 @@ def main(ctx):
 @click.option("--export-json", type=click.Path(path_type=Path), help="Export results to JSON")
 @click.option("--ignore-duration", is_flag=True, help="Ignore duration constraints")
 @click.option("--watch", "-w", is_flag=True, help="Watch mode: re-run on file changes")
-def run(
+def main(
     yaml_file: Path | None,
     debug: bool,
     coverage: float,
@@ -98,7 +87,7 @@ def run(
     ignore_duration: bool,
     watch: bool,
 ):
-    """Run evaluations from YAML spec files."""
+    """vowel — YAML-based evaluation framework for Python functions."""
     console = Console(force_terminal=False, no_color=True) if no_color else Console()
 
     # Validate incompatible options

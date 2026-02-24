@@ -2,13 +2,13 @@
 
 fixtures:
   db:
-    cls: Connection # setup cls
+    cls: db.Connection # setup cls
     kwargs:
       db_path: users.db
-    teardown: Connection.close # teardown method
+    teardown: db.Connection.close # teardown method
     scope: module # scope 
 
-Connection.query:
+db.Connection.execute:
   fixture:
     - db
   evals:
@@ -16,8 +16,8 @@ Connection.query:
       type: dict | list | None
   dataset:
     - case:
-        input: "SELECT max(id) FROM users" 
-        assertion: "output and output[0] == (None,)"
+        input: "SELECT * FROM users WHERE id=1" 
+        assertion: "output and isinstance(output[0], dict)"
     - case:
         input: "SELECT * FROM users"
         expected: []
