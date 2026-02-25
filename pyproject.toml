@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vowel"
-version = "0.3.2"
+version = "0.3.3"
 description = "A modular evaluation framework for testing functions with YAML-based specifications"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -62,6 +62,7 @@ all = [
 
 [project.scripts]
 vowel = "vowel.cli:main"
+vowel-mcp = "vowel.mcp_server:main"
 
 [project.urls]
 Homepage = "https://github.com/fswair/vowel"

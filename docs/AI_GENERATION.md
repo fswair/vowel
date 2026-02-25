@@ -206,7 +206,10 @@ print(signature.to_signature_str())
 # def factorial(n: int) -> int
 
 # Step 2: Generate eval spec from signature
-runner, yaml_spec = generator.generate_evals_from_signature(signature)
+runner, yaml_spec = generator.generate_evals_from_signature(
+    signature,
+    description="Calculate factorial of a non-negative integer",
+)
 print(yaml_spec)
 # factorial:
 #   dataset:
@@ -215,7 +218,11 @@ print(yaml_spec)
 #     ...
 
 # Step 3: Generate implementation from signature + evals
-func = generator.generate_implementation(signature, yaml_spec)
+func = generator.generate_implementation(
+    signature,
+    yaml_spec,
+    description="Calculate factorial of a non-negative integer",
+)
 print(func.code)
 # def factorial(n: int) -> int:
 #     if n <= 1:

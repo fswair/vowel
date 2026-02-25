@@ -1,5 +1,5 @@
 # Validation & parsing functions with pattern + raises evaluators.
-# Run: vowel run examples/evals/validation.yml
+# Run: vowel examples/evals/validation.yml
 
 examples.evals.functions.validate_email:
   evals:

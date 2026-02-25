@@ -13,21 +13,21 @@ class TestWatchMode:
     def test_watch_option_exists(self):
         """Test that --watch option is available."""
         runner = CliRunner()
-        result = runner.invoke(main, ["run", "--help"])
+        result = runner.invoke(main, ["--help"])
         assert "-w, --watch" in result.output
         assert "Watch mode" in result.output
 
     def test_watch_requires_yaml_file(self):
         """Test that --watch requires a YAML file argument."""
         runner = CliRunner()
-        result = runner.invoke(main, ["run", "--watch"])
+        result = runner.invoke(main, ["--watch"])
         assert result.exit_code != 0
         assert "requires a YAML file" in result.output or "Missing argument" in result.output
 
     def test_watch_with_nonexistent_file(self):
         """Test --watch with non-existent file."""
         runner = CliRunner()
-        result = runner.invoke(main, ["run", "nonexistent.yml", "--watch"])
+        result = runner.invoke(main, ["nonexistent.yml", "--watch"])
         assert result.exit_code != 0
 
     @patch("watchdog.observers.Observer")
@@ -58,7 +58,7 @@ class TestWatchMode:
 
             # This will timeout/interrupt, so we catch it
             with patch("time.sleep", side_effect=KeyboardInterrupt):
-                runner.invoke(main, ["run", temp_path, "--watch"])
+                runner.invoke(main, [temp_path, "--watch"])
 
             # Observer should have been started
             mock_observer.start.assert_called_once()

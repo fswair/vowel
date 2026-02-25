@@ -1,5 +1,5 @@
 # String utility functions.
-# Run: vowel run examples/evals/strings.yml
+# Run: vowel examples/evals/strings.yml
 
 examples.evals.functions.is_palindrome:
   evals:

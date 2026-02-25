@@ -32,4 +32,4 @@ jobs:
       - name: Run vowel eval check
         run: |
           source venv/bin/activate
-          vowel run -d examples/evals --ci --cov 100 --ignore-duration
+          vowel -d examples/evals --ci --cov 100 --ignore-duration -v --hide-report

@@ -3,18 +3,9 @@
     "prompt_preview": "generate_and_run",
     "model": "openrouter:google/gemini-3-flash-preview",
     "response": {
-      "yaml_spec": "double:\n  evals:\n    ReturnType:\n      type: int\n    DoubleLogic:\n      assertion: \"output == input * 2\"\n    FastExecution:\n      duration: 0.001\n  dataset:\n    - case:\n        id: positive_integer\n        input: 10\n        expected: 20\n    - case:\n        id: negative_integer\n        input: -5\n        expected: -10\n    - case:\n        id: zero_input\n        input: 0\n        expected: 0\n    - case:\n        id: large_integer\n        input: 1000000\n        expected: 2000000\n    - case:\n        id: invalid_type_string\n        input: \"5\"\n        raises: TypeError\n    - case:\n        id: null_input\n        input: null\n        raises: TypeError",
+      "yaml_spec": "double:\n  evals:\n    CorrectType:\n      type: int\n    DoubleLogic:\n      assertion: output == input * 2\n    NonNegativeIfInputNonNegative:\n      assertion: input < 0 or output >= input\n  dataset:\n  - case:\n      id: positive_integer\n      input: 5\n      expected: 10\n  - case:\n      id: zero\n      input: 0\n      expected: 0\n  - case:\n      id: negative_integer\n      input: -4\n      expected: -8\n  - case:\n      id: large_integer\n      input: 1000000\n      expected: 2000000\n  - case:\n      id: sequence_multiplication_check\n      input: 1\n      expected: 2\n  - case:\n      id: invalid_type_string\n      input: '10'\n      assertion: output == '1010'\n",
       "was_healed": false,
-      "coverage": 0.0
-    }
-  },
-  "9558b80955e7f650": {
-    "prompt_preview": "generate_and_run",
-    "model": "google-vertex:gemini-3-flash-preview",
-    "response": {
-      "yaml_spec": "double:\n  evals:\n    ReturnType:\n      type: int\n    MathematicalCorrectness:\n      assertion: output == input * 2\n  dataset:\n  - case:\n      id: positive_integer\n      input: 21\n      expected: 42\n  - case:\n      id: negative_integer\n      input: -15\n      expected: -30\n  - case:\n      id: zero_value\n      input: 0\n      expected: 0\n  - case:\n      id: large_integer\n      input: 123456789\n      expected: 246913578\n  - case:\n      id: large_negative\n      input: -5000000\n      expected: -10000000\n  - case:\n      id: float_input\n      input: 10.5\n      expected: 21.0\n      type: float\n",
-      "was_healed": false,
-      "coverage": 1.0
+      "coverage": 0.8333333333333334
     }
   }
 }

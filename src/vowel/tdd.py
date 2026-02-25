@@ -681,6 +681,7 @@ Generate a complete FunctionSignature with:
         retry_delay: float = 2.0,
         ignore_duration: bool = True,
         additional_context: str = "",
+        description: str = "",
     ) -> tuple[RunEvals, str]:
         """Step 2: Generate eval spec from signature.
 
@@ -697,6 +698,7 @@ Generate a complete FunctionSignature with:
             retry_delay: Seconds to wait between retries
             ignore_duration: Ignore duration evaluator when running validation
             additional_context: Extra context to include in the prompt
+            description: Original intent/description of the function (improves test quality)
 
         Returns:
             Tuple of (RunEvals runner, yaml_spec string)
@@ -723,6 +725,7 @@ Regenerate the YAML spec addressing every failure above.
                 prompt = f"""Generate eval YAML spec for this function signature:
 
 {signature.to_prompt_context()}
+{f"Original intent: {description}" if description else ""}
 
 Requirements:
 - Use `{signature.name}` as eval_id
@@ -817,6 +820,7 @@ IMPORTANT: In assertions, use `input[0]`, `input[1]` to access positional args.
         signature: FunctionSignature,
         yaml_spec: str,
         additional_context: str = "",
+        description: str = "",
     ) -> Function:
         """Step 3: Generate implementation that passes the evals.
 
@@ -824,6 +828,7 @@ IMPORTANT: In assertions, use `input[0]`, `input[1]` to access positional args.
             signature: Function signature to implement
             yaml_spec: Eval spec the implementation must pass
             additional_context: Extra context to include in the prompt
+            description: Original intent/description of the function (improves implementation quality)
 
         Returns:
             Function with implementation code
@@ -831,6 +836,7 @@ IMPORTANT: In assertions, use `input[0]`, `input[1]` to access positional args.
         with logfire.span("Generating implementation", name=signature.name):
             prompt = f"""Implement this function to pass all test cases:
 
+{f"Intent: {description}" if description else ""}
 {signature.to_stub()}
 
 Test cases (must pass all):
@@ -898,6 +904,7 @@ Requirements:
                     signature,
                     min_cases,
                     additional_context=additional_context,
+                    description=description,
                 )
 
                 # Step 3: Generate implementation (with retries)
@@ -905,7 +912,9 @@ Requirements:
 
                 summary: EvalSummary | None = None
                 for impl_attempt in range(max_impl_retries + 1):
-                    func = self.generate_implementation(signature, yaml_spec, additional_context)
+                    func = self.generate_implementation(
+                        signature, yaml_spec, additional_context, description
+                    )
 
                     # If max_eval_retries > 0, re-validate evals against this impl
                     if max_eval_retries > 0 and impl_attempt == 0:
@@ -918,6 +927,7 @@ Requirements:
                             retry_delay=retry_delay,
                             ignore_duration=ignore_duration,
                             additional_context=additional_context,
+                            description=description,
                         )
 
                     # Run evals

@@ -58,6 +58,34 @@ When generating eval specifications, follow these guidelines:
    - NOT generic names like `test1`, `case_a`
 
 ---
+
+## 🚨 STRICT RULES — MUST FOLLOW WITHOUT EXCEPTION
+
+### RULE 1: INPUT VALUES MUST BE YAML-NATIVE LITERALS ONLY
+Every value under `input:`, `inputs:`, and `expected:` MUST be a plain YAML literal:
+- ✅ Allowed: strings, numbers, booleans, lists written out, dicts written out, null
+- ❌ FORBIDDEN: Python expressions, list comprehensions, function calls, generators, operators
+  - ❌ `input: [i for i in range(10)]`  → Write out the list: `input: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]`
+  - ❌ `input: list(range(5))`  → Write: `input: [0, 1, 2, 3, 4]`
+  - ❌ `input: 2**10`  → Write: `input: 1024`
+  - ❌ `input: "hello" + " world"`  → Write: `input: "hello world"`
+  - ❌ `expected: sorted([3,1,2])`  → Write: `expected: [1, 2, 3]`
+- YAML files are DATA, not CODE. Every value must be ready to parse as-is.
+
+### RULE 2: ALL STRINGS MUST USE DOUBLE QUOTES — MINIMIZE ESCAPING
+- ✅ Every string value MUST be wrapped in double quotes: `"like this"`
+- ❌ NEVER use single quotes or unquoted strings for values
+- ✅ Keep escape sequences to a MINIMUM (at most 2 backslashes per string)
+- ✅ Prefer character classes over backslash escapes in regex: `[0-9]` instead of `\d`, `[a-zA-Z]` instead of `\w`
+- ❌ NEVER use unicode escape sequences: no `\u0041`, no `\x41`, no `\U0001F600`
+- If a string requires heavy escaping, SIMPLIFY the test case instead of adding more backslashes.
+
+### RULE 3: NO CHARACTER ENCODING / UNICODE ASSERTIONS
+- ❌ NEVER test character encoding, byte representations, or unicode internals
+- ❌ FORBIDDEN in assertions: `.encode()`, `ord()`, `chr()`, `\u` escapes, `\x` escapes, `bytes()`, `b""` literals
+- ❌ FORBIDDEN assertion patterns: byte length comparisons, encoding round-trips, codepoint checks
+- ✅ Instead, test the actual STRING behavior: equality, containment, length, pattern matching
+
 ## 🧭 EXPECTED vs ASSERTION DECISION GUIDE
 
 **RULE: Use `expected` when the value is TRIVIALLY VERIFIABLE. Use `assertion` when you would need to COMPUTE or TRACE an algorithm to get the exact value.**
@@ -761,6 +789,24 @@ Supports **optional raises** with `?` suffix for uncertain error cases.
 - `raises: ValueError` → Function **MUST** raise ValueError. Fails if it returns normally.
 - `raises: ValueError?` → Function **MAY** raise ValueError. Passes if it raises ValueError OR returns normally. Only fails if a DIFFERENT exception is raised.
 
+### Wildcard Raises (`any`):
+- `raises: any` → Function **MUST** raise **any** exception. Fails if it returns normally.
+- `raises: any?` → Function **MAY** raise any exception. Passes whether it raises OR returns normally. Always passes.
+
+Use `raises: any` when you know the function will raise but you're not sure which exception type.
+Use `raises: any?` for defensive error cases where the function might or might not raise.
+
+```yaml
+# Wildcard raises examples
+- case:
+    input: null
+    raises: any           # Must raise SOME exception, don't care which type
+
+- case:
+    input: ""
+    raises: any?          # Might raise or might return — both are fine
+```
+
 **⚠️ IMPORTANT Notes:**
 - `raises` is **case-level only** - cannot be used as global evaluator
 - `match` can **only** be used together with `raises`
@@ -916,7 +962,7 @@ All fields available within a `case:` block:
 | `assertion` | `str` | Python expression that must be True |
 | `pattern` | `str` | Regex pattern to match output |
 | `case_sensitive` | `bool` | Case sensitivity for pattern (default: true) |
-| `raises` | `str` | Expected exception type. Use `?` suffix for optional (e.g., `TypeError?`) |
+| `raises` | `str` | Expected exception type. Use `?` for optional (e.g., `TypeError?`). Use `any` for any exception. |
 | `match` | `str` | Regex for exception message (only with raises) |
 | `type` | `str` | Expected output type for this case (e.g., `int`, `list[str]`) |
 | `strict_type` | `bool` | If true, exact type match required (default: false) |
@@ -1138,10 +1184,11 @@ sort_descending:
         input: [7, 7, 7, 7]
         expected: [7, 7, 7, 7]
 
-    # Performance test
+    # Performance test — use literal values, NOT Python expressions
     - case:
         id: "large_list"
-        input: [i for i in range(1000)]
+        input: [999, 998, 997, 996, 995, 994, 993, 992, 991, 990]
+        assertion: "sorted(output, reverse=True) == output"
         duration: 500    # 500ms (case level - milliseconds)
 ```
 """
@@ -1204,6 +1251,34 @@ When generating eval specifications, follow these guidelines:
    - NOT generic names like `test1`, `case_a`
 
 ---
+
+## 🚨 STRICT RULES — MUST FOLLOW WITHOUT EXCEPTION
+
+### RULE 1: INPUT VALUES MUST BE YAML-NATIVE LITERALS ONLY
+Every value under `input:`, `inputs:`, and `expected:` MUST be a plain YAML literal:
+- ✅ Allowed: strings, numbers, booleans, lists written out, dicts written out, null
+- ❌ FORBIDDEN: Python expressions, list comprehensions, function calls, generators, operators
+  - ❌ `input: [i for i in range(10)]`  → Write out the list: `input: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]`
+  - ❌ `input: list(range(5))`  → Write: `input: [0, 1, 2, 3, 4]`
+  - ❌ `input: 2**10`  → Write: `input: 1024`
+  - ❌ `input: "hello" + " world"`  → Write: `input: "hello world"`
+  - ❌ `expected: sorted([3,1,2])`  → Write: `expected: [1, 2, 3]`
+- YAML files are DATA, not CODE. Every value must be ready to parse as-is.
+
+### RULE 2: ALL STRINGS MUST USE DOUBLE QUOTES — MINIMIZE ESCAPING
+- ✅ Every string value MUST be wrapped in double quotes: `"like this"`
+- ❌ NEVER use single quotes or unquoted strings for values
+- ✅ Keep escape sequences to a MINIMUM (at most 2 backslashes per string)
+- ✅ Prefer character classes over backslash escapes in regex: `[0-9]` instead of `\d`, `[a-zA-Z]` instead of `\w`
+- ❌ NEVER use unicode escape sequences: no `\u0041`, no `\x41`, no `\U0001F600`
+- If a string requires heavy escaping, SIMPLIFY the test case instead of adding more backslashes.
+
+### RULE 3: NO CHARACTER ENCODING / UNICODE ASSERTIONS
+- ❌ NEVER test character encoding, byte representations, or unicode internals
+- ❌ FORBIDDEN in assertions: `.encode()`, `ord()`, `chr()`, `\u` escapes, `\x` escapes, `bytes()`, `b""` literals
+- ❌ FORBIDDEN assertion patterns: byte length comparisons, encoding round-trips, codepoint checks
+- ✅ Instead, test the actual STRING behavior: equality, containment, length, pattern matching
+
 ## 🧭 EXPECTED vs ASSERTION DECISION GUIDE
 
 **RULE: Use `expected` when the value is TRIVIALLY VERIFIABLE. Use `assertion` when you would need to COMPUTE or TRACE an algorithm to get the exact value.**
@@ -1918,6 +1993,24 @@ Supports **optional raises** with `?` suffix for uncertain error cases.
 - `raises: ValueError` → Function **MUST** raise ValueError. Fails if it returns normally.
 - `raises: ValueError?` → Function **MAY** raise ValueError. Passes if it raises ValueError OR returns normally. Only fails if a DIFFERENT exception is raised.
 
+### Wildcard Raises (`any`):
+- `raises: any` → Function **MUST** raise **any** exception. Fails if it returns normally.
+- `raises: any?` → Function **MAY** raise any exception. Passes whether it raises OR returns normally. Always passes.
+
+Use `raises: any` when you know the function will raise but you’re not sure which exception type.
+Use `raises: any?` for defensive error cases where the function might or might not raise.
+
+```yaml
+# Wildcard raises examples
+- case:
+    input: null
+    raises: any           # Must raise SOME exception, don’t care which type
+
+- case:
+    input: ""
+    raises: any?          # Might raise or might return — both are fine
+```
+
 **⚠️ IMPORTANT Notes:**
 - `raises` is **case-level only** - cannot be used as global evaluator
 - `match` can **only** be used together with `raises`
@@ -2074,7 +2167,7 @@ All fields available within a `case:` block:
 | `assertion` | `str` | Python expression that must be True |
 | `pattern` | `str` | Regex pattern to match output |
 | `case_sensitive` | `bool` | Case sensitivity for pattern (default: true) |
-| `raises` | `str` | Expected exception type. Use `?` suffix for optional (e.g., `TypeError?`) |
+| `raises` | `str` | Expected exception type. Use `?` for optional (e.g., `TypeError?`). Use `any` for any exception. Use any? for any exception/normally return |
 | `match` | `str` | Regex for exception message (only with raises) |
 | `type` | `str` | Expected output type for this case (e.g., `int`, `list[str]`) |
 | `strict_type` | `bool` | If true, exact type match required (default: false) |
@@ -2296,10 +2389,11 @@ sort_descending:
         input: [7, 7, 7, 7]
         expected: [7, 7, 7, 7]
 
-    # Performance test
+    # Performance test — use literal values, NOT Python expressions
     - case:
         id: "large_list"
-        input: [i for i in range(1000)]
+        input: [999, 998, 997, 996, 995, 994, 993, 992, 991, 990]
+        assertion: "sorted(output, reverse=True) == output"
         duration: 500    # 500ms (case level - milliseconds)
 ```
 """

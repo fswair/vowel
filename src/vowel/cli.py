@@ -1,8 +1,10 @@
 """Command-line interface for the vowel evaluation framework.
 
 Usage:
-    vowel run <yaml_file>             Run evaluations from a YAML spec
-    vowel run -d <directory>          Run all YAML files in a directory
+    vowel <yaml_file>                 Run evaluations from a YAML spec
+    vowel -d <directory>              Run all YAML files in a directory
+    vowel <yaml_file> -v              Detailed summary with spec semantics
+    vowel <yaml_file> --hide-report   Hide pydantic_evals report output
 """
 
 import sys
@@ -17,10 +19,213 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.tree import Tree
 
-from .utils import load_bundle, run_evals
+from .eval_types import (
+    AssertionCase,
+    ContainsInputCase,
+    DurationCase,
+    IsInstanceCase,
+    LLMJudgeCase,
+    PatternMatchCase,
+)
+from .utils import EvalsBundle, EvalSummary, load_bundle, run_evals
 
 dotenv.load_dotenv()
 console = Console()
+
+
+def _eval_type_label(case) -> str:
+    """Return short human label for an evaluator case type."""
+    labels = {
+        IsInstanceCase: "Type",
+        AssertionCase: "Assertion",
+        DurationCase: "Duration",
+        ContainsInputCase: "ContainsInput",
+        PatternMatchCase: "Pattern",
+        LLMJudgeCase: "LLMJudge",
+    }
+    return labels.get(type(case), type(case).__name__)
+
+
+def _print_verbose_summary(
+    console: Console, summary: EvalSummary, bundle: EvalsBundle, yaml_file: Path
+) -> None:
+    """Print a detailed evaluation summary with spec semantics and result breakdown."""
+    total_cases = sum(len(e.dataset) for e in bundle.evals.values())
+    total_global_evals = sum(len(e.evals) for e in bundle.evals.values())
+
+    # ── Spec Overview Panel ──
+    info = Table.grid(padding=(0, 2))
+    info.add_column(style="bold")
+    info.add_column()
+    info.add_row("File", str(yaml_file.name))
+    info.add_row("Functions", str(len(bundle.evals)))
+    info.add_row("Total Cases", str(total_cases))
+    info.add_row("Global Evaluators", str(total_global_evals))
+    info.add_row("Fixtures", str(len(bundle.fixtures)) if bundle.fixtures else "none")
+    if bundle.fixtures:
+        for fname, fdef in bundle.fixtures.items():
+            setup_label = fdef.cls or fdef.setup or "none"
+            kind = "cls" if fdef.cls else "setup"
+            teardown_label = fdef.teardown or "none"
+            info.add_row(
+                f"  {fname}", f"scope={fdef.scope}  {kind}={setup_label}  teardown={teardown_label}"
+            )
+    console.print()
+    console.print(Panel(info, title="Spec Overview", border_style="bright_cyan"))
+
+    # ── Per-Function Detail Table ──
+    detail = Table(
+        title="Evaluation Detail",
+        box=box.ROUNDED,
+        show_header=True,
+        header_style="bold white",
+        expand=True,
+    )
+    detail.add_column("Function", style="white bold", no_wrap=True)
+    detail.add_column("Fixtures", style="grey70")
+    detail.add_column("Global Evaluators", style="grey70")
+    detail.add_column("Cases", justify="center", style="white")
+    detail.add_column("Passed", justify="center", style="green")
+    detail.add_column("Failed", justify="center", style="bright_red")
+    detail.add_column("Coverage", justify="center")
+
+    for result in summary.results:
+        eval_def = bundle.evals.get(result.eval_id)
+        if not eval_def:
+            detail.add_row(result.eval_id, "-", "-", "-", "-", "-", "-")
+            continue
+
+        fixtures_str = ", ".join(eval_def.fixture) if eval_def.fixture else "[grey50]none[/grey50]"
+
+        # Global evaluators with types
+        if eval_def.evals:
+            eval_parts = []
+            for ename, ecase in eval_def.evals.items():
+                eval_parts.append(f"{ename} [grey50]({_eval_type_label(ecase)})[/grey50]")
+            evals_str = "\n".join(eval_parts)
+        else:
+            evals_str = "[grey50]none[/grey50]"
+
+        case_count = len(eval_def.dataset)
+
+        if result.error:
+            detail.add_row(
+                result.eval_id,
+                fixtures_str,
+                evals_str,
+                str(case_count),
+                "-",
+                "-",
+                "[bright_red]ERROR[/bright_red]",
+            )
+        elif result.report:
+            passed = sum(
+                1 for c in result.report.cases if all(a.value for a in c.assertions.values())
+            )
+            failed = len(result.report.cases) - passed
+            cov = passed / len(result.report.cases) * 100 if result.report.cases else 100
+            cov_style = "green" if cov == 100 else "yellow" if cov >= 50 else "red"
+            detail.add_row(
+                result.eval_id,
+                fixtures_str,
+                evals_str,
+                str(case_count),
+                str(passed),
+                str(failed) if failed else "[grey50]0[/grey50]",
+                f"[{cov_style}]{cov:.0f}%[/{cov_style}]",
+            )
+
+    console.print()
+    console.print(detail)
+
+    # ── Case-Level Breakdown ──
+    for result in summary.results:
+        if not result.report:
+            continue
+        eval_def = bundle.evals.get(result.eval_id)
+        if not eval_def:
+            continue
+
+        case_table = Table(
+            title=f"Cases: {result.eval_id}",
+            box=box.SIMPLE_HEAVY,
+            show_header=True,
+            header_style="bold white",
+        )
+        case_table.add_column("Case", style="white", no_wrap=True)
+        case_table.add_column("Expected", style="grey70", max_width=25, overflow="ellipsis")
+        case_table.add_column("Assertions", style="grey70")
+        case_table.add_column("Status", justify="center")
+
+        for i, case_result in enumerate(result.report.cases):
+            case_name = case_result.name or f"case_{i}"
+            total_assertions = len(case_result.assertions)
+            passed_assertions = sum(1 for a in case_result.assertions.values() if a.value)
+            all_pass = passed_assertions == total_assertions
+
+            # Get expected from dataset if available
+            ds_case = eval_def.dataset[i].case if i < len(eval_def.dataset) else None
+            expected_str = "-"
+            if ds_case:
+                if ds_case.raises:
+                    expected_str = ds_case.raises
+                elif ds_case.has_expected:
+                    expected_str = repr(ds_case.expected)
+
+            status = (
+                "[green]PASS[/green]"
+                if all_pass
+                else f"[bright_red]{passed_assertions}/{total_assertions}[/bright_red]"
+            )
+
+            # Build assertion names only (strip expression after colon)
+            assertion_parts = []
+            for aname, ares in case_result.assertions.items():
+                short_name = aname.split(":")[0].strip()
+                mark = "[green]✓[/green]" if ares.value else "[bright_red]✗[/bright_red]"
+                assertion_parts.append(f"{mark} {short_name}")
+            assertions_str = ", ".join(assertion_parts)
+
+            case_table.add_row(case_name, expected_str, assertions_str, status)
+
+        console.print()
+        console.print(case_table)
+
+    # ── Overall Summary ──
+    _print_overall_summary(console, summary)
+
+
+def _print_overall_summary(console: Console, summary: EvalSummary) -> None:
+    """Print the Overall Summary panel (used in both default and verbose modes)."""
+    total_case_count = sum(len(r.report.cases) for r in summary.results if r.report)
+    passed_case_count = sum(
+        1
+        for r in summary.results
+        if r.report
+        for c in r.report.cases
+        if all(a.value for a in c.assertions.values())
+    )
+    failed_case_count = total_case_count - passed_case_count
+    overall_cov = summary.coverage * 100
+    cov_style = "green" if overall_cov == 100 else "yellow" if overall_cov >= 50 else "red"
+
+    summary_grid = Table.grid(padding=(0, 3))
+    summary_grid.add_column(style="bold white")
+    summary_grid.add_column()
+    summary_grid.add_row("Pass Rate", f"[{cov_style}]{overall_cov:.1f}%[/{cov_style}]")
+    summary_grid.add_row("Total Cases", f"{total_case_count}")
+    summary_grid.add_row("Passed Cases", f"[green]{passed_case_count}[/green]")
+    summary_grid.add_row(
+        "Failed Cases",
+        f"[bright_red]{failed_case_count}[/bright_red]" if failed_case_count else "0",
+    )
+    summary_grid.add_row(
+        "Total Failures",
+        f"[bright_red]{summary.error_count}[/bright_red]" if summary.error_count else "0",
+    )
+
+    console.print()
+    console.print(Panel(summary_grid, title="Overall Summary", border_style="bright_cyan"))
 
 
 def find_yaml_files(directory: Path) -> list[Path]:
@@ -71,6 +276,8 @@ def validate_coverage(ctx, param, value):
 @click.option("--export-json", type=click.Path(path_type=Path), help="Export results to JSON")
 @click.option("--ignore-duration", is_flag=True, help="Ignore duration constraints")
 @click.option("--watch", "-w", is_flag=True, help="Watch mode: re-run on file changes")
+@click.option("--verbose", "-v", is_flag=True, help="Show detailed evaluation summary")
+@click.option("--hide-report", is_flag=True, help="Hide pydantic_evals report output")
 def main(
     yaml_file: Path | None,
     debug: bool,
@@ -86,6 +293,8 @@ def main(
     export_json: Path | None,
     ignore_duration: bool,
     watch: bool,
+    verbose: bool,
+    hide_report: bool,
 ):
     """vowel — YAML-based evaluation framework for Python functions."""
     console = Console(force_terminal=False, no_color=True) if no_color else Console()
@@ -298,11 +507,12 @@ def main(
                     debug=debug,
                     ignore_duration=ignore_duration,
                 )
-                for result in summary.results:
-                    if result.error:
-                        console.print(f"[red]Error: {result.eval_id}: {result.error}[/red]")
-                    elif result.report:
-                        result.report.print(include_averages=True, include_reasons=True)
+                if not hide_report:
+                    for result in summary.results:
+                        if result.error:
+                            console.print(f"[red]Error: {result.eval_id}: {result.error}[/red]")
+                        elif result.report:
+                            result.report.print(include_averages=True, include_reasons=True)
                 if summary.all_passed:
                     console.print(f"[green]✓ All {summary.total_count} passed[/green]")
                 else:
@@ -392,39 +602,95 @@ def main(
 
     # Multiple files mode
     if directory and len(all_summaries) > 1:
-        total_functions = 0
-        total_success = 0
-        total_failed = 0
+        total_cases = 0
+        total_passed_cases = 0
         total_errors = 0
 
         for yf, summary in all_summaries:
+            total_errors += summary.error_count
+            for r in summary.results:
+                if r.report:
+                    for c in r.report.cases:
+                        total_cases += 1
+                        if all(a.value for a in c.assertions.values()):
+                            total_passed_cases += 1
+
             if not quiet:
                 console.print()
-                console.print(Panel(f"[cyan]{yf.name}[/cyan]", border_style="cyan"))
+                # Per-file table
+                file_table = Table(
+                    title=f"[bold white]{yf.name}[/bold white]",
+                    box=box.ROUNDED,
+                    show_header=True,
+                    header_style="bold white",
+                    expand=True,
+                )
+                file_table.add_column("Function", style="white bold", no_wrap=True)
+                file_table.add_column("Cases", justify="center", style="white")
+                file_table.add_column("Passed", justify="center", style="green")
+                file_table.add_column("Failed", justify="center", style="bright_red")
+                file_table.add_column("Errors", justify="center")
+                file_table.add_column("Pass Rate", justify="center")
 
                 for result in summary.results:
                     if result.error:
-                        console.print(f"  [red]x {result.eval_id}[/red]: {result.error}")
-                    elif result.report:
-                        console.print()
-                        console.print(Panel(result.eval_id, border_style="blue"))
-                        result.report.print(include_averages=True, include_reasons=True)
+                        file_table.add_row(
+                            result.eval_id,
+                            "-",
+                            "-",
+                            "-",
+                            "[bright_red]ERR[/bright_red]",
+                            "[bright_red]—[/bright_red]",
+                        )
+                        continue
+                    if result.report:
+                        cases = result.report.cases
+                        n = len(cases)
+                        passed = sum(
+                            1 for c in cases if all(a.value for a in c.assertions.values())
+                        )
+                        failed = n - passed
+                        rate = passed / n * 100 if n else 100
+                        rate_style = (
+                            "green" if rate == 100 else "yellow" if rate >= 50 else "bright_red"
+                        )
+                        file_table.add_row(
+                            result.eval_id,
+                            str(n),
+                            str(passed),
+                            str(failed) if failed else "[grey50]0[/grey50]",
+                            "[grey50]0[/grey50]",
+                            f"[{rate_style}]{rate:.0f}%[/{rate_style}]",
+                        )
 
-            total_functions += summary.total_count
-            total_success += summary.success_count
-            total_failed += summary.failed_count
-            total_errors += summary.error_count
+                console.print(file_table)
 
         if not quiet:
+            # Combined Overall Summary panel
+            total_failed_cases = total_cases - total_passed_cases
+            overall_rate = (total_passed_cases / total_cases * 100) if total_cases else 100
+            rate_style = (
+                "green" if overall_rate == 100 else "yellow" if overall_rate >= 50 else "bright_red"
+            )
+
+            summary_grid = Table.grid(padding=(0, 3))
+            summary_grid.add_column(style="bold white")
+            summary_grid.add_column()
+            summary_grid.add_row("Files", str(len(all_summaries)))
+            summary_grid.add_row("Total Cases", str(total_cases))
+            summary_grid.add_row("Successful Evaluations", f"[green]{total_passed_cases}[/green]")
+            summary_grid.add_row(
+                "Failed Evaluations",
+                f"[bright_red]{total_failed_cases}[/bright_red]" if total_failed_cases else "0",
+            )
+            summary_grid.add_row(
+                "Evaluation Errors",
+                f"[bright_red]{total_errors}[/bright_red]" if total_errors else "0",
+            )
+            summary_grid.add_row("Pass Rate", f"[{rate_style}]{overall_rate:.1f}%[/{rate_style}]")
+
             console.print()
-            console.print(Panel("Combined Summary", border_style="blue"))
-            console.print(f"  Total files: [cyan]{len(all_summaries)}[/cyan]")
-            console.print(f"  Total functions: [cyan]{total_functions}[/cyan]")
-            console.print(f"  Passed: [green]{total_success}[/green]")
-            if total_failed > 0:
-                console.print(f"  Failed: [yellow]{total_failed}[/yellow]")
-            if total_errors > 0:
-                console.print(f"  Errors: [red]{total_errors}[/red]")
+            console.print(Panel(summary_grid, title="Overall Summary", border_style="bright_cyan"))
 
         if ci:
             failed_coverage = False
@@ -451,39 +717,24 @@ def main(
     if not quiet:
         console.print()
 
-    for result in summary.results:
-        if result.error:
-            console.print(f"[red]Error: {result.eval_id}: {result.error}[/red]")
-            continue
+    if not hide_report:
+        for result in summary.results:
+            if result.error:
+                console.print(f"[red]Error: {result.eval_id}: {result.error}[/red]")
+                continue
 
-        if result.report:
-            result.report.print(include_averages=True, include_reasons=True)
+            if result.report:
+                result.report.print(include_averages=True, include_reasons=True)
 
     console.print()
 
-    # Summary table
-    summary_table = Table(
-        title="Summary", box=box.ROUNDED, show_header=True, header_style="bold cyan"
-    )
-    summary_table.add_column("Metric", style="cyan", no_wrap=True, width=20)
-    summary_table.add_column("Count", justify="center", width=10)
-    summary_table.add_column("Status", justify="center", width=15)
+    if verbose:
+        bundle = load_bundle(yaml_files[0])
+        _print_verbose_summary(console, summary, bundle, yaml_files[0])
 
-    summary_table.add_row("Total Functions", str(summary.total_count), "[blue]-[/blue]")
-
-    summary_table.add_row(
-        "Passed",
-        str(summary.success_count),
-        "[green]PASS[/green]" if summary.success_count > 0 else "[dim]-[/dim]",
-    )
-
-    if summary.failed_count > 0:
-        summary_table.add_row("Failed", str(summary.failed_count), "[yellow]FAIL[/yellow]")
-
-    if summary.error_count > 0:
-        summary_table.add_row("Errors", str(summary.error_count), "[red]ERROR[/red]")
-
-    console.print(summary_table)
+    # Always print Overall Summary panel (verbose already includes it)
+    if not verbose:
+        _print_overall_summary(console, summary)
 
     # Export JSON
     if export_json:

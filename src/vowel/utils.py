@@ -1065,7 +1065,7 @@ def to_dataset(
         case_evaluators = []
 
         if match_case.has_expected:
-            case_evaluators.append(EqualsExpected())
+            case_evaluators.append(EqualsExpected(evaluation_name="Equals"))
 
         if match_case.has_duration and not ignore_duration and match_case.duration is not None:
             case_evaluators.append(MaxDuration(timedelta(milliseconds=match_case.duration)))

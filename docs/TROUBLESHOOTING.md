@@ -113,10 +113,10 @@ single_param:
 **Solution:** Check actual coverage or adjust threshold:
 
 ```bash
-vowel evals.yml --coverage 80
+vowel evals.yml --cov 80
 
 # If coverage is 75%, either fix failing tests or lower threshold
-vowel evals.yml --ci --coverage 75
+vowel evals.yml --ci --cov 75
 ```
 
 ---

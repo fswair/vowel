@@ -422,13 +422,13 @@ vowel evals.yml -q
 vowel evals.yml --no-color
 
 # CI mode with coverage threshold
-vowel evals.yml --ci --coverage 90
+vowel evals.yml --ci --cov 90
 
 # Coverage warning (no exit code)
-vowel evals.yml --coverage 80
+vowel evals.yml --cov 80
 
 # Combine options
-vowel -d tests/ -q --ci --coverage 80
+vowel -d tests/ -q --ci --cov 80
 ```
 
 ### CLI Options Reference
@@ -443,7 +443,7 @@ vowel -d tests/ -q --ci --coverage 80
 | `--quiet` | `-q` | Minimal output, only show summary |
 | `--no-color` | | Disable colored output |
 | `--ci` | | CI mode, exit 1 on failure |
-| `--coverage` | | Required coverage percentage (default: 100) |
+| `--cov` / `--coverage` | | Required coverage percentage (default: 100) |
 
 #### Information Options
 
@@ -453,6 +453,8 @@ vowel -d tests/ -q --ci --coverage 80
 | `--dry-run` | Show test plan without running tests |
 | `--fixture-tree` | Show fixture dependency tree |
 | `--export-json PATH` | Export results to JSON file |
+| `--verbose` / `-v` | Detailed summary: spec overview, per-case breakdown, pass rate |
+| `--hide-report` | Hide pydantic_evals report output |
 
 #### Examples
 
@@ -469,14 +471,20 @@ vowel evals.yml --fixture-tree
 # Export results to JSON
 vowel evals.yml --export-json results.json
 
+# Verbose summary (spec overview, case breakdown, pass rate)
+vowel evals.yml -v
+
+# Verbose without pydantic_evals report output
+vowel evals.yml -v --hide-report
+
 # Combine options
-vowel -d tests/ -q --ci --coverage 80 --export-json ci-results.json
+vowel -d tests/ -q --ci --cov 80 --export-json ci-results.json
 ```
 
 ### Coverage Behavior
 
-- `--coverage 90`: Shows warning if coverage < 90%, does NOT exit
-- `--ci --coverage 90`: Exits with code 1 if coverage < 90%
+- `--cov 90`: Shows warning if coverage < 90%, does NOT exit
+- `--ci --cov 90`: Exits with code 1 if coverage < 90%
 
 ---
 

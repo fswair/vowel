@@ -57,9 +57,6 @@ dist/
 *.egg-info/
 tmp/
 
-# Skills
-skills/
-
 # Cache
 .ruff_cache
 uv.lock
@@ -67,9 +64,8 @@ uv.lock
 # Testing
 tmp/
 benchmarks/
+evaluations/
 
 # !!
 TODO
-
-# Experimental
-run.py
+docs/FIXTURE_GENERATION_RFC.md

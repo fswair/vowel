@@ -1,5 +1,5 @@
 # Built-in & standard library functions — no code needed.
-# Run: vowel run examples/evals/builtins.yml
+# Run: vowel examples/evals/builtins.yml
 
 len:
   dataset:

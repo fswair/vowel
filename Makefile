@@ -1,6 +1,9 @@
+
 BLUE := \033[1;34m
 GREEN := \033[1;32m
 RESET := \033[0m
+
+.PHONY: tests format check all prod
 
 format:
 	@printf "$(BLUE)==>$(RESET) Formatting code with ruff...\n"
@@ -16,4 +19,11 @@ check:
 	@basedpyright
 	@printf "$(GREEN)✔ Checking complete.$(RESET)\n"
 
+tests:
+	@printf "$(BLUE)==>$(RESET) Running tests with pytest...\n"
+	@pytest
+	@printf "$(GREEN)✔ Tests complete.$(RESET)\n"
+
 all: format check
+
+prod: tests format check

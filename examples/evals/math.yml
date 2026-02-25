@@ -1,5 +1,5 @@
 # Math & numeric functions with multiple evaluator types.
-# Run: vowel run examples/evals/math.yml
+# Run: vowel examples/evals/math.yml
 
 examples.evals.functions.fibonacci:
   evals:

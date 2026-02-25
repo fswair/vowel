@@ -3,15 +3,7 @@
     "prompt_preview": "generate_spec",
     "model": "openrouter:google/gemini-3-flash-preview",
     "response": {
-      "yaml_spec": "reverse_string:\n  evals:\n    IsString:\n      type: str\n    PreservesLength:\n      assertion: \"len(output) == len(input)\"\n    Reversible:\n      assertion: \"output[::-1] == input\"\n    FastPerformance:\n      duration: 0.001\n  dataset:\n    - case:\n        id: typical_word\n        input: \"hello\"\n        expected: \"olleh\"\n    \n    - case:\n        id: sentence_with_spaces\n        input: \"vowel eval\"\n        expected: \"lave lewow\"\n    \n    - case:\n        id: numeric_string\n        input: \"123456789\"\n        expected: \"987654321\"\n    \n    - case:\n        id: palindrome\n        input: \"racecar\"\n        expected: \"racecar\"\n        assertion: \"output == input\"\n    \n    - case:\n        id: empty_string\n        input: \"\"\n        expected: \"\"\n    \n    - case:\n        id: single_character\n        input: \"A\"\n        expected: \"A\"\n    \n    - case:\n        id: special_characters\n        input: \"!@#$%^&*\"\n        expected: \"*&^%$#@!\"\n    \n    - case:\n        id: invalid_type_none\n        input: null\n        raises: TypeError\n    \n    - case:\n        id: invalid_type_int\n        input: 123\n        raises: TypeError\n",
-      "func_name": "reverse_string"
-    }
-  },
-  "029ddf9bf77815af": {
-    "prompt_preview": "generate_spec",
-    "model": "google-vertex:gemini-3-flash-preview",
-    "response": {
-      "yaml_spec": "reverse_string:\n  evals:\n    IsString:\n      type: str\n    LengthCheck:\n      assertion: len(output) == len(input)\n    DoubleReverse:\n      assertion: output[::-1] == input\n  dataset:\n  - case:\n      id: typical_word\n      input: hello\n      expected: olleh\n  - case:\n      id: empty_string\n      input: ''\n      expected: ''\n  - case:\n      id: single_character\n      input: z\n      expected: z\n  - case:\n      id: palindrome\n      input: racecar\n      expected: racecar\n  - case:\n      id: sentence_with_spaces\n      input: top spot\n      expected: tops pot\n  - case:\n      id: special_characters\n      input: '!@#$%^&*'\n      expected: '*&^%$#@!'\n  - case:\n      id: numeric_string\n      input: '123456789'\n      expected: '987654321'\n  - case:\n      id: case_sensitivity\n      input: Python\n      expected: nohtyP\n",
+      "yaml_spec": "reverse_string:\n  evals:\n    IsString:\n      type: str\n    ReverseProperty:\n      assertion: output[::-1] == input\n    LengthInvariant:\n      assertion: len(output) == len(input)\n  dataset:\n  - case:\n      id: typical_word\n      input: hello\n      expected: olleh\n  - case:\n      id: empty_string\n      input: ''\n      expected: ''\n  - case:\n      id: single_character\n      input: z\n      expected: z\n  - case:\n      id: palindrome\n      input: racecar\n      expected: racecar\n  - case:\n      id: strings_with_spaces\n      input: abc def\n      expected: fed cba\n  - case:\n      id: numeric_string\n      input: '12345'\n      expected: '54321'\n  - case:\n      id: special_characters\n      input: '!@#$%^&*()'\n      expected: )(*&^%$#@!\n",
       "func_name": "reverse_string"
     }
   }

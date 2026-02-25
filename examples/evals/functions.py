@@ -4,7 +4,7 @@ These functions are referenced from YAML files via module paths
 like `examples.evals.functions.is_palindrome`.
 
 Run any YAML file in this directory with:
-    vowel run examples/evals/<file>.yml
+    vowel examples/evals/<file>.yml
 """
 
 import json

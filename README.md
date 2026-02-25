@@ -1,10 +1,10 @@
 # VOWEL
 
-**YAML-based evaluation framework for testing Python functions with AI-powered test generation and function healing.**
+**YAML-based evaluation framework for testing Python functions with AI-powered test generation, function healing and TDD approach.**
 
 vowel makes it easy to define test cases in YAML and run them against your Python functions. It also provides AI-powered generators that can automatically create test specs, generate implementations, and fix buggy functions.
 
-[![PyPI Downloads](https://static.pepy.tech/personalized-badge/vowel?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/vowel) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/fswair/vowel) 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/fswair/vowel) [![zread](https://img.shields.io/badge/Ask_Zread-_.svg?style=flat&color=00b0aa&labelColor=000000&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTQuOTYxNTYgMS42MDAxSDIuMjQxNTZDMS44ODgxIDEuNjAwMSAxLjYwMTU2IDEuODg2NjQgMS42MDE1NiAyLjI0MDFWNC45NjAxQzEuNjAxNTYgNS4zMTM1NiAxLjg4ODEgNS42MDAxIDIuMjQxNTYgNS42MDAxSDQuOTYxNTZDNS4zMTUwMiA1LjYwMDEgNS42MDE1NiA1LjMxMzU2IDUuNjAxNTYgNC45NjAxVjIuMjQwMUM1LjYwMTU2IDEuODg2NjQgNS4zMTUwMiAxLjYwMDEgNC45NjE1NiAxLjYwMDFaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00Ljk2MTU2IDEwLjM5OTlIMi4yNDE1NkMxLjg4ODEgMTAuMzk5OSAxLjYwMTU2IDEwLjY4NjQgMS42MDE1NiAxMS4wMzk5VjEzLjc1OTlDMS42MDE1NiAxNC4xMTM0IDEuODg4MSAxNC4zOTk5IDIuMjQxNTYgMTQuMzk5OUg0Ljk2MTU2QzUuMzE1MDIgMTQuMzk5OSA1LjYwMTU2IDE0LjExMzQgNS42MDE1NiAxMy43NTk5VjExLjAzOTlDNS42MDE1NiAxMC42ODY0IDUuMzE1MDIgMTAuMzk5OSA0Ljk2MTU2IDEwLjM5OTlaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik0xMy43NTg0IDEuNjAwMUgxMS4wMzg0QzEwLjY4NSAxLjYwMDEgMTAuMzk4NCAxLjg4NjY0IDEwLjM5ODQgMi4yNDAxVjQuOTYwMUMxMC4zOTg0IDUuMzEzNTYgMTAuNjg1IDUuNjAwMSAxMS4wMzg0IDUuNjAwMUgxMy43NTg0QzE0LjExMTkgNS42MDAxIDE0LjM5ODQgNS4zMTM1NiAxNC4zOTg0IDQuOTYwMVYyLjI0MDFDMTQuMzk4NCAxLjg4NjY0IDE0LjExMTkgMS42MDAxIDEzLjc1ODQgMS42MDAxWiIgZmlsbD0iI2ZmZiIvPgo8cGF0aCBkPSJNNCAxMkwxMiA0TDQgMTJaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00IDEyTDEyIDQiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K&logoColor=ffffff)](https://zread.ai/fswair/vowel) [![PyPI Downloads](https://static.pepy.tech/personalized-badge/vowel?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/vowel)
 
 ## Installation
 
@@ -20,12 +20,25 @@ uv add vowel
 ```bash
 git clone https://github.com/fswair/vowel.git
 cd vowel
-pip install -e .
+pip install -e ".[all]"
 ```
 
 ---
 
 ## Quick Start
+
+> **Note:**  
+> For a deeper understanding of how vowel handles fixtures, see the examples in [`db_fixture.yml`](./db_fixture.yml) and [`db.py`](./db.py). These files demonstrate the underlying mechanics of fixture setup and usage.
+
+> **Tip:**  
+> To enable YAML schema validation in your editor, place `vowel-schema.json` in your project directory.  
+> Then, add the following directive at the top of your YAML file to activate schema support and instructions:
+>
+> ```yaml
+> # yaml-language-server: $schema=<path/to/vowel-schema.json>
+> ```
+>
+> Replace `<path/to/vowel-schema.json>` with the actual path to your schema file.
 
 ### 1. Create a YAML spec
 
@@ -199,9 +212,10 @@ result.print()  # Shows: signature → tests → code → results
 Step-by-step control:
 
 ```python
-signature = generator.generate_signature(description="...", name="factorial")
-runner, yaml_spec = generator.generate_evals_from_signature(signature)
-func = generator.generate_implementation(signature, yaml_spec)
+description = "Calculate factorial of a non-negative integer"
+signature = generator.generate_signature(description=description, name="factorial")
+runner, yaml_spec = generator.generate_evals_from_signature(signature, description=description)
+func = generator.generate_implementation(signature, yaml_spec, description=description)
 summary = runner.with_functions({"factorial": func.impl}).run()
 ```
 
@@ -221,10 +235,12 @@ Expose vowel's capabilities to AI assistants like Claude Desktop via Model Conte
 vowel evals.yml                          # Run single file
 vowel -d ./tests                         # Run directory
 vowel evals.yml -f add,divide            # Filter functions
-vowel evals.yml --ci --coverage 90       # CI mode
+vowel evals.yml --ci --cov 90         # CI mode
 vowel evals.yml --watch                  # Watch mode
 vowel evals.yml --dry-run                # Show plan without running
 vowel evals.yml --export-json out.json   # Export results
+vowel evals.yml -v                       # Verbose summary
+vowel evals.yml -v --hide-report         # Verbose, hide pydantic_evals report
 ```
 
 > **Full reference:** [docs/CLI.md](https://github.com/fswair/vowel/blob/main/docs/CLI.md)

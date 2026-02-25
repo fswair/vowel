@@ -60,22 +60,28 @@ Run individual YAML files or the entire directory:
 
 ```bash
 # Run a single file
-vowel run examples/evals/builtins.yml
-vowel run examples/evals/strings.yml --quiet
-vowel run examples/evals/math.yml --debug
+vowel examples/evals/builtins.yml
+vowel examples/evals/strings.yml --quiet
+vowel examples/evals/math.yml --debug
 
 # Run all YAML files in the directory
-vowel run -d examples/evals
+vowel -d examples/evals
 
 # Run in CI environment
-vowel run -d examples/evals --ci --cov 95
-vowel run -d examples/evals --ci --ignore-duration
+vowel -d examples/evals --ci --cov 95
+vowel -d examples/evals --ci --ignore-duration
 
 # Filter by function name
-vowel run -d examples/evals --filter fibonacci
+vowel -d examples/evals --filter fibonacci
 
 # Export results as JSON
-vowel run -d examples/evals --export-json results.json
+vowel -d examples/evals --export-json results.json
+
+# Verbose summary with spec overview and case breakdown
+vowel examples/evals/math.yml -v
+
+# Verbose without pydantic_evals report
+vowel examples/evals/math.yml -v --hide-report
 ```
 
 ## What each example covers

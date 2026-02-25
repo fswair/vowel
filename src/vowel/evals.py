@@ -138,7 +138,13 @@ class TypeAdapterEvaluator(Evaluator):
         """Validate that output matches the expected type."""
         if isinstance(ctx.output, dict) and "_exception" in ctx.output:
             return EvaluationReason(value=True, reason="Skipped (exception case)")
-        type_env = {"typing": typing}
+        type_env = {
+            "typing": typing,
+            "__import__": None,
+            "eval": None,
+            "exec": None,
+            "compile": None,
+        }
         try:
             expected_type = eval(self.type, type_env, type_env)
             ta = TypeAdapter(expected_type)
@@ -252,6 +258,10 @@ class RaisesEvaluator(Evaluator):
     When optional=True (from 'raises: TypeError?' syntax), the evaluator
     passes if the function returns normally OR raises the expected exception.
     It only fails if a DIFFERENT exception type is raised.
+
+    Special values:
+        'any'  — function must raise any exception (type doesn't matter)
+        'any?' — function may raise any exception or return normally
     """
 
     expected_exception_type: str
@@ -261,7 +271,24 @@ class RaisesEvaluator(Evaluator):
 
     def evaluate(self, ctx: EvaluatorContext) -> EvaluationReason:
         output = ctx.output
-        if not isinstance(output, dict) or "_exception" not in output:
+        is_exception = isinstance(output, dict) and "_exception" in output
+
+        # raises: any / raises: any?
+        if self.expected_exception_type == "any":
+            if not is_exception:
+                if self.optional:
+                    return EvaluationReason(
+                        value=True,
+                        reason="Function returned normally (raises: any? — OK)",
+                    )
+                return EvaluationReason(
+                    value=False,
+                    reason=f"Expected any exception to be raised, but function returned normally with output: {output!r}",
+                )
+            actual_type = output["_exception_type"]
+            return EvaluationReason(value=True, reason=f"Correctly raised {actual_type}")
+
+        if not is_exception:
             if self.optional:
                 return EvaluationReason(
                     value=True,
@@ -279,17 +306,17 @@ class RaisesEvaluator(Evaluator):
             )
         actual_exception = output["_exception"]
         actual_type = output["_exception_type"]
-        if actual_type != self.expected_exception_type:
+        expected_type_short = self.expected_exception_type.split(".")[-1]
+        if actual_type != expected_type_short:
             return EvaluationReason(
                 value=False,
                 reason=(
-                    f"Expected {self.expected_exception_type}, "
-                    f"but got {actual_type}: {actual_exception}"
+                    f"Expected {expected_type_short}, but got {actual_type}: {actual_exception}"
                 ),
             )
         if self.expected_exception_match:
             exception_message = str(actual_exception)
-            if not re.search(self.expected_exception_match, exception_message):
+            if not re.search(self.expected_exception_match, exception_message, re.I):
                 return EvaluationReason(
                     value=False,
                     reason=(
