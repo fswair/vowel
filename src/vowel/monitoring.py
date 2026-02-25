@@ -28,6 +28,9 @@ def enable_monitoring(
                 logfire.ConsoleOptions(show_project_link=False),
             )
 
+            if "token" not in options and (token := os.getenv("LOGFIRE_TOKEN")):
+                options["token"] = token
+
             logfire.configure(**options, console=console)
             logfire.instrument_pydantic_ai()
 

@@ -64,12 +64,18 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import nest_asyncio
 from mcp.server.fastmcp import FastMCP
 
 from vowel import check_compatibility, load_evals_from_yaml_string, run_evals
 from vowel.ai import EVAL_SPEC_CONTEXT, EvalGenerator
+from vowel.monitoring import enable_monitoring
 from vowel.runner import Function, RunEvals
 from vowel.tdd import TDDGenerator
+
+enable_monitoring(service_name="vowel-mcp")
+
+nest_asyncio.apply()
 
 # ── Helpers ──
 
@@ -878,8 +884,4 @@ def _summary_to_dict(summary: Any) -> dict[str, Any]:
 
 
 def main():
-    mcp.run()
-
-
-if __name__ == "__main__":
     mcp.run()
