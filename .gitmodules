@@ -3,4 +3,4 @@
 	url = https://github.com/fswair/vowel-optimization.git
 [submodule "skills/vowel-core"]
 	path = skills/vowel-core
-	url = git:fswair/vowel-core
+	url = https://github.com/fswair/vowel-core.git
