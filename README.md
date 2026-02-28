@@ -65,8 +65,8 @@ pip install -e ".[all]"
 add:
   dataset:
     - case:
-        inputs: { x: 1, y: 2 }
-        expected: 3
+        inputs: { x: 2, y: 2 }
+        expected: 4
     - case:
         inputs: { x: -5, y: 5 }
         expected: 0
