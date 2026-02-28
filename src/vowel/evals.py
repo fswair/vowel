@@ -16,6 +16,7 @@ Factory functions:
     prepare_env_and_condition: Prepares evaluation context
 """
 
+import importlib.util
 import logging
 import os
 import re
@@ -23,13 +24,14 @@ import typing
 from contextlib import suppress
 from dataclasses import dataclass
 
-import pydantic_monty
 from pydantic import ValidationError
 from pydantic.type_adapter import TypeAdapter
 from pydantic_ai.settings import ModelSettings
 from pydantic_evals.evaluators import EvaluationReason, Evaluator, EvaluatorContext, LLMJudge
 
 logger = logging.getLogger(__name__)
+
+MONTY_AVAILABLE = bool(importlib.util.find_spec("pydantic-monty"))
 
 
 def prepare_env_and_condition(ctx: EvaluatorContext, condition: str) -> tuple[dict, str]:
@@ -78,11 +80,15 @@ class AssertionEvaluator(Evaluator):
     def __init__(self, condition: str, *, evaluation_name: str = "Assertion"):
         self.condition = condition
         self.evaluation_name = evaluation_name
-        self.interpreter = pydantic_monty.Monty(
-            condition,
-            script_name="assertion.py",
-            inputs=["input", "output", "expected", "metrics", "metadata", "duration"],
-        )
+        self.interpreter = None
+        if MONTY_AVAILABLE:
+            import pydantic_monty
+
+            self.interpreter = pydantic_monty.Monty(  # pyright: ignore[reportOptionalMemberAccess]
+                condition,
+                script_name="assertion.py",
+                inputs=["input", "output", "expected", "metrics", "metadata", "duration"],
+            )
 
     def evaluate(self, ctx: EvaluatorContext) -> EvaluationReason:
         """Evaluate the assertion condition against the context."""
@@ -109,10 +115,16 @@ class AssertionEvaluator(Evaluator):
 
     def eval_python(self, condition: str, inputs: dict) -> EvaluationReason:
         try:
-            if self.interpreter.run(inputs=inputs):
-                return EvaluationReason(
-                    value=True, reason=f"Assertion passed for condition: {condition}"
+            if self.interpreter:
+                if self.interpreter.run(inputs=inputs):
+                    return EvaluationReason(
+                        value=True, reason=f"Assertion passed for condition: {condition}"
+                    )
+            else:
+                raise ImportError(
+                    "Monty runtime is unavailable, install via `pip install vowel[monty]`."
                 )
+
         except Exception:
             with suppress(Exception):
                 if eval(self.condition, inputs, inputs):

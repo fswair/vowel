@@ -15,6 +15,24 @@ pip install vowel
 uv add vowel
 ```
 
+## Optional Dependencies
+
+Vowel supports several optional dependency groups for enhanced functionality:
+
+| Group         | Install Command                        | Purpose / Extras                |
+|---------------|---------------------------------------|---------------------------------|
+| **all**       | `pip install vowel[all]`              | All optional features           |
+| **dev**       | `pip install vowel[dev]`              | Development & testing tools     |
+| **mcp**       | `pip install vowel[mcp]`              | MCP server   |
+| **optimization** | `pip install vowel[optimize]`      | Performance optimizations       |
+| **monty**     | `pip install vowel[monty]`            | Monty runtime support     |
+| **logfire**   | `pip install vowel[logfire]`          | Logfire integration             |
+
+> **Tip:**  
+> You can install multiple extras at once, e.g.  
+> `pip install vowel[dev,mcp]`
+> Recommended: `pip install vowel[all]`
+
 ### Development
 
 ```bash

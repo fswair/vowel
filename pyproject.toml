@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vowel"
-version = "0.3.3"
+version = "0.3.4"
 description = "A modular evaluation framework for testing functions with YAML-based specifications"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -54,11 +54,15 @@ mcp = [
 logfire = [
     "logfire",
 ]
+
+monty = [
+    "pydantic-monty"
+]
 optimize = [
     "vowel-optimization"
 ]
 all = [
-    "vowel[optimize,dev,mcp,logfire]",
+    "vowel[optimize,dev,mcp,logfire,monty]",
 ]
 
 [project.scripts]
