@@ -178,7 +178,7 @@ class TestCheckCompatibility:
         def greet(name: str, title: str | None = None) -> str:
             return f"{title or ''} {name}"
 
-        is_compatible, issues = check_compatibility(greet)
+        is_compatible, _ = check_compatibility(greet)
 
         assert is_compatible
 
@@ -188,7 +188,7 @@ class TestCheckCompatibility:
         def process(items: list[dict[str, int]], config: dict[str, Any]) -> list[int]:
             return []
 
-        is_compatible, issues = check_compatibility(process)
+        is_compatible, _ = check_compatibility(process)
 
         assert is_compatible
 
@@ -204,7 +204,7 @@ class TestRealWorldFunctions:
                 return 1
             return n * factorial(n - 1)
 
-        is_compatible, issues = check_compatibility(factorial)
+        is_compatible, _ = check_compatibility(factorial)
 
         assert is_compatible
 
@@ -216,7 +216,7 @@ class TestRealWorldFunctions:
                 text = text.strip()
             return text[:max_length]
 
-        is_compatible, issues = check_compatibility(process_text)
+        is_compatible, _ = check_compatibility(process_text)
 
         assert is_compatible
 
@@ -228,7 +228,7 @@ class TestRealWorldFunctions:
         ) -> list[dict[str, Any]]:
             return records
 
-        is_compatible, issues = check_compatibility(transform_data)
+        is_compatible, _ = check_compatibility(transform_data)
 
         assert is_compatible
 
@@ -249,7 +249,7 @@ class TestRealWorldFunctions:
         async def fetch_data(url: str, timeout: float = 30.0) -> dict:
             return {}
 
-        is_compatible, issues = check_compatibility(fetch_data)
+        is_compatible, _ = check_compatibility(fetch_data)
 
         assert is_compatible
 
@@ -263,7 +263,7 @@ class TestEdgeCases:
         def no_params() -> int:
             return 42
 
-        is_compatible, issues = check_compatibility(no_params)
+        is_compatible, _ = check_compatibility(no_params)
 
         assert is_compatible
 
@@ -273,7 +273,7 @@ class TestEdgeCases:
         def var_func(*args: int) -> int:
             return sum(args)
 
-        is_compatible, issues = check_compatibility(var_func)
+        is_compatible, _ = check_compatibility(var_func)
 
         assert is_compatible
 
@@ -283,7 +283,7 @@ class TestEdgeCases:
         def kwarg_func(**kwargs: int) -> int:
             return sum(kwargs.values())
 
-        is_compatible, issues = check_compatibility(kwarg_func)
+        is_compatible, _ = check_compatibility(kwarg_func)
 
         assert is_compatible
 
@@ -293,7 +293,7 @@ class TestEdgeCases:
         def mixed(a: int, *args, b: str = "default", **kwargs) -> str:
             return ""
 
-        is_compatible, issues = check_compatibility(mixed)
+        is_compatible, _ = check_compatibility(mixed)
 
         assert is_compatible
 
@@ -303,6 +303,6 @@ class TestEdgeCases:
         def func(x):
             return x * 2
 
-        is_compatible, issues = check_compatibility(func)
+        is_compatible, _ = check_compatibility(func)
 
         assert is_compatible
