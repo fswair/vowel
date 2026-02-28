@@ -277,7 +277,7 @@ fixtures:
     teardown: test_fixtures.teardown_db
     scope: module
     kwargs:
-      host: 192.168.1.1
+      host: 127.0.0.1
       port: 5432
 
 examples.functions.add_numbers:
@@ -297,7 +297,7 @@ examples.functions.add_numbers:
         assert "db" in bundle.fixtures
         assert bundle.fixtures["db"].setup == "test_fixtures.setup_db"
         assert bundle.fixtures["db"].scope == "module"
-        assert bundle.fixtures["db"].kwargs == {"host": "192.168.1.1", "port": 5432}
+        assert bundle.fixtures["db"].kwargs == {"host": "127.0.0.1", "port": 5432}
 
     def test_load_bundle_without_fixtures(self):
         """Should load evals without fixtures."""
