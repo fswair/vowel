@@ -20,14 +20,12 @@ Container models:
     EvalsFile: Root model for YAML file parsing
 """
 
-import logging
+import logfire
 import os
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.experimental.missing_sentinel import MISSING
-
-logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -784,6 +782,6 @@ class EvalsFile(BaseModel):
                 try:
                     result[key] = Evals(id=key, **value)
                 except Exception as e:
-                    logger.warning(f"Failed to process eval '{key}': {e}")
+                    logfire.warn("Failed to process eval '{key}': {error}", key=key, error=str(e))
 
         return result

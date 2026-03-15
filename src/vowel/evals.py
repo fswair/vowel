@@ -17,7 +17,6 @@ Factory functions:
 """
 
 import importlib.util
-import logging
 import os
 import re
 import typing
@@ -28,8 +27,6 @@ from pydantic import ValidationError
 from pydantic.type_adapter import TypeAdapter
 from pydantic_ai.settings import ModelSettings
 from pydantic_evals.evaluators import EvaluationReason, Evaluator, EvaluatorContext, LLMJudge
-
-logger = logging.getLogger(__name__)
 
 MONTY_AVAILABLE = bool(importlib.util.find_spec("pydantic-monty"))
 

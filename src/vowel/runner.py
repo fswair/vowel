@@ -97,6 +97,7 @@ class Function(BaseModel, Generic[_RT]):
         local_scope: dict[str, object] = {}
         try:
             code = self.code
+            code = self._sanitize_code(code)
             try:
                 exec(code, local_scope, local_scope)
             except Exception:
@@ -105,11 +106,61 @@ class Function(BaseModel, Generic[_RT]):
                     exec(code, local_scope, local_scope)
                 else:
                     raise
+            self.code = code  # persist cleaned code for downstream use
 
         except Exception as e:
             raise RuntimeError(f"Error executing code for function '{self.name}'.") from e
 
         self.func = local_scope[self.name]
+
+    @staticmethod
+    def _sanitize_code(code: str) -> str:
+        """Fix common LLM code-generation artefacts before exec.
+
+        1. Strip escaped quotes (``\\\"``) that break docstrings.
+        2. Remove redundant ``from typing import`` of Python 3.9+ builtins
+           (dict, list, tuple, set, frozenset, type) that cause ImportError
+           on Python ≥ 3.11.
+        """
+        import re as _re
+
+        # 1. Un-escape literal backslash-quote sequences
+        if '\\"' in code or "\\'" in code:
+            code = code.replace('\\"', '"').replace("\\'", "'")
+
+        # 2. Remove typing imports of builtin generics
+        _BUILTIN_GENERICS = {
+            "Dict",
+            "List",
+            "Tuple",
+            "Set",
+            "FrozenSet",
+            "Type",
+            "dict",
+            "list",
+            "tuple",
+            "set",
+            "frozenset",
+            "type",
+        }
+
+        def _clean_typing_import(m: _re.Match) -> str:
+            names = [n.strip() for n in m.group(1).split(",")]
+            remaining = [n for n in names if n not in _BUILTIN_GENERICS]
+            if not remaining:
+                return ""  # remove the entire import line
+            return f"from typing import {', '.join(remaining)}"
+
+        code = _re.sub(
+            r"^from\s+typing\s+import\s+(.+)$",
+            _clean_typing_import,
+            code,
+            flags=_re.MULTILINE,
+        )
+        # Remove any blank lines left behind
+        code = _re.sub(r"\n{3,}", "\n\n", code)
+
+        return code
 
     def __call__(self, *args, **kwargs) -> _RT:
         """

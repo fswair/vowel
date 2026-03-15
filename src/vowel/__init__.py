@@ -32,9 +32,20 @@ import importlib.metadata
 __version__ = importlib.metadata.version("vowel")
 
 from .ai import EvalGenerator, GenerationResult, UnsupportedParameterTypeError
+from .codemode import CodeModeGenerator, CodeModeResult, ExplorationPlan, SnippetResult
 from .context import EVAL_SPEC_CONTEXT
 from .errors import FixturePathError, SignatureError
 from .eval_types import EvalsFile
+from .executor import (
+    DefaultExecutor,
+    DefaultSession,
+    ExecutionResult,
+    ExecutionSession,
+    Executor,
+    MontyExecutor,
+    MontyReplSession,
+    get_executor,
+)
 from .runner import Function, RunEvals
 from .utils import (
     EvalResult,
@@ -73,4 +84,18 @@ __all__ = [
     "check_compatibility",
     "get_unsupported_params",
     "is_yaml_serializable_type",
+    # CodeMode executor
+    "Executor",
+    "ExecutionResult",
+    "ExecutionSession",
+    "MontyExecutor",
+    "MontyReplSession",
+    "DefaultExecutor",
+    "DefaultSession",
+    "get_executor",
+    # CodeMode pipeline
+    "CodeModeGenerator",
+    "CodeModeResult",
+    "ExplorationPlan",
+    "SnippetResult",
 ]

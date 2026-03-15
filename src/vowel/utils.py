@@ -26,7 +26,7 @@ import contextlib
 import importlib
 import importlib.util
 import inspect
-import logging
+import logfire
 import os
 import sys
 import types
@@ -55,8 +55,6 @@ from .evals import (
     TypeAdapterEvaluator,
     create_llm_judge,
 )
-
-logger = logging.getLogger(__name__)
 
 _SYS_PATH_MODIFIED = False
 
@@ -825,7 +823,11 @@ def import_function(module_path: str) -> Any:
         try:
             module = importlib.import_module(module_name)
         except ImportError as e:
-            logger.debug(f"Standard import failed for '{module_name}': {e}")
+            logfire.debug(
+                "Standard import failed for '{module_name}': {error}",
+                module_name=module_name,
+                error=str(e),
+            )
             relative_path = module_name.replace(".", os.sep) + ".py"
             file_path = os.path.join(os.getcwd(), relative_path)
 
@@ -835,9 +837,15 @@ def import_function(module_path: str) -> Any:
                     if spec and spec.loader:
                         module = importlib.util.module_from_spec(spec)
                         spec.loader.exec_module(module)
-                        logger.debug(f"File-based import succeeded for '{file_path}'")
+                        logfire.debug(
+                            "File-based import succeeded for '{file_path}'", file_path=file_path
+                        )
                 except Exception as e:
-                    logger.debug(f"File-based import failed for '{file_path}': {e}")
+                    logfire.debug(
+                        "File-based import failed for '{file_path}': {error}",
+                        file_path=file_path,
+                        error=str(e),
+                    )
 
         if module:
             try:
@@ -846,7 +854,7 @@ def import_function(module_path: str) -> Any:
                     obj = getattr(obj, part)
                 return obj
             except AttributeError as e:
-                logger.debug(f"Attribute lookup failed: {e}")
+                logfire.debug("Attribute lookup failed: {error}", error=str(e))
                 continue
 
     try:
@@ -1127,7 +1135,7 @@ def to_dataset(
             input_value = {"input": match_case.input}
 
         if any(case for case in dataset_cases if input_value == case.inputs):
-            logger.warning("Already exists in dataset, skipping duplicate case.")
+            logfire.warn("Already exists in dataset, skipping duplicate case.")
             continue
 
         dataset_cases.append(
