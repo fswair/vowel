@@ -36,7 +36,7 @@ from pydantic_ai.models import Model
 
 from vowel.context import EVAL_SPEC_CONTEXT
 from vowel.eval_types import EvalsSource
-from vowel.executor import Executor, get_executor
+from vowel.executor import Executor, resolve_executors
 from vowel.monitoring import enable_monitoring
 from vowel.runner import Function, RunEvals
 from vowel.spec_validation import (
@@ -229,6 +229,7 @@ class TDDGenerator:
         additional_context: str | list[str] | None = None,
         load_env: bool = False,
         executor: Executor | None = None,
+        fallback_executor: Executor | None = None,
         **opts,
     ):
         if load_env:
@@ -256,6 +257,7 @@ class TDDGenerator:
 
         # Optional executor for expected-value validation
         self._executor = executor
+        self._fallback_executor = fallback_executor
 
         self._opts = opts
 
@@ -792,7 +794,10 @@ IMPORTANT: In assertions, use `input[0]`, `input[1]` to access positional args.
                                 code=real_code,
                                 description=signature.description,
                             )
-                            executor = getattr(self, "_executor", None) or get_executor("auto")
+                            executor = resolve_executors(
+                                getattr(self, "_executor", None),
+                                getattr(self, "_fallback_executor", None),
+                            )
                             yaml_spec = validate_expected_values(
                                 yaml_spec,
                                 val_func,

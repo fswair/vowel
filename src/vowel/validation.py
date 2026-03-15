@@ -388,7 +388,7 @@ def validate_and_fix_spec(
             modified = True
 
     if modified:
-        result.fixed_yaml = yaml.dump(
+        result.fixed_yaml = yaml.safe_dump(
             data, default_flow_style=False, allow_unicode=True, sort_keys=False
         )
         logfire.info(

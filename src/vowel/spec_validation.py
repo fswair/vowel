@@ -12,7 +12,7 @@ from typing import Any
 import logfire
 import yaml
 
-from vowel.executor import Executor, get_executor
+from vowel.executor import Executor, resolve_executors
 from vowel.runner import Function
 from vowel.utils import EvalSummary
 
@@ -70,6 +70,7 @@ def inject_durations(
     func: Function,
     executor: Executor,
     *,
+    fallback_executor: Executor | None = None,
     buffer_pct: float = 0.5,
     floor_ms: float = 10.0,
 ) -> str:
@@ -96,6 +97,8 @@ def inject_durations(
     spec = yaml.safe_load(yaml_spec)
     if not isinstance(spec, dict):
         return yaml_spec
+
+    executor = resolve_executors(executor, fallback_executor)
 
     try:
         session = executor.create_session(func.code)
@@ -127,13 +130,14 @@ def inject_durations(
                     )
                     case["duration"] = round(dur, 1)
 
-    return yaml.dump(spec, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    return yaml.safe_dump(spec, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
 
 def validate_expected_values(
     yaml_spec: str,
     func: Function,
     executor: Executor | None = None,
+    fallback_executor: Executor | None = None,
 ) -> str:
     """Validate and fix expected values in a YAML spec by executing cases.
 
@@ -152,14 +156,14 @@ def validate_expected_values(
     func:
         Function to execute.
     executor:
-        Executor backend.  Defaults to ``get_executor("auto")``.
+        Executor backend.  Defaults to Monty-first with Default fallback.
 
     Returns
     -------
     str
         Fixed YAML spec with corrected expected values.
     """
-    executor = executor or get_executor("auto")
+    executor = resolve_executors(executor, fallback_executor)
 
     spec = yaml.safe_load(yaml_spec)
     if not isinstance(spec, dict):
@@ -189,15 +193,19 @@ def validate_expected_values(
                 result = session.feed(call_code)
 
                 # --- Fix expected values ---
-                if "expected" in case and not case.get("raises"):
-                    if result.success and result.output != case["expected"]:
-                        logfire.info(
-                            "Fixing expected value for case: {expected} → {actual}",
-                            expected=repr(case["expected"]),
-                            actual=repr(result.output),
-                        )
-                        case["expected"] = result.output
-                        fixes_applied += 1
+                if (
+                    "expected" in case
+                    and not case.get("raises")
+                    and result.success
+                    and result.output != case["expected"]
+                ):
+                    logfire.info(
+                        "Fixing expected value for case: {expected} → {actual}",
+                        expected=repr(case["expected"]),
+                        actual=repr(result.output),
+                    )
+                    case["expected"] = result.output
+                    fixes_applied += 1
 
                 # --- Fix raises cases ---
                 if case.get("raises"):
@@ -226,7 +234,7 @@ def validate_expected_values(
 
     if fixes_applied > 0:
         logfire.info("Validated spec: {count} fixes applied", count=fixes_applied)
-        return yaml.dump(spec, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        return yaml.safe_dump(spec, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
     return yaml_spec
 
@@ -307,6 +315,11 @@ def inject_missing_error_cases(
                 "raises": error_type,
             }
         elif len(args) == 1:
+            # Tuples cannot be represented in yaml.safe_load()-compatible YAML.
+            # Other non-list inputs (None, int, str, dict) already cover the
+            # same TypeError path, so skip rather than convert and break semantics.
+            if isinstance(args[0], tuple):
+                continue
             input_repr = repr((args[0], None))
             if input_repr in existing_raises_inputs:
                 continue
@@ -337,6 +350,6 @@ def inject_missing_error_cases(
 
     if injected > 0:
         logfire.info("Injected {count} missing error cases into spec", count=injected)
-        return yaml.dump(spec, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        return yaml.safe_dump(spec, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
     return yaml_spec

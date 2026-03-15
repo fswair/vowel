@@ -69,3 +69,15 @@ evaluations/
 # !!
 TODO
 docs/FIXTURE_GENERATION_RFC.md
+
+# CodeMode
+monty.py
+monty/
+
+# Benchmarks
+benchmark*
+parse_cron_evals.yml
+PLAN.md
+codegen.py
+bundle_*.py
+*test.py

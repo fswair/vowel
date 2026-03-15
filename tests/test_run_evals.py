@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from vowel import EvalSummary, RunEvals, run_evals
+from vowel.executor import DefaultExecutor
 
 
 class TestRunEvalsFromFile:
@@ -142,6 +143,28 @@ class TestRunEvalsWithFunctions:
         """Test chaining with_functions calls."""
         summary = (
             RunEvals.from_source(simple_yaml_spec).with_functions({"add": lambda a, b: a + b}).run()
+        )
+
+        assert summary.all_passed
+
+    def test_with_executor_preserves_existing_run_behavior(self, simple_yaml_spec: str):
+        """Executor preferences should be accepted without changing normal eval behavior."""
+        summary = (
+            RunEvals.from_source(simple_yaml_spec)
+            .with_functions({"add": lambda a, b: a + b})
+            .with_executor(DefaultExecutor(), fallback_executor=DefaultExecutor())
+            .run()
+        )
+
+        assert summary.all_passed
+
+    def test_run_evals_accepts_executor_preferences(self, simple_yaml_spec: str):
+        """Top-level run_evals should accept executor preferences."""
+        summary = run_evals(
+            simple_yaml_spec,
+            functions={"add": lambda a, b: a + b},
+            executor=DefaultExecutor(),
+            fallback_executor=DefaultExecutor(),
         )
 
         assert summary.all_passed

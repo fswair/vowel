@@ -36,7 +36,8 @@ from typing import Any, Generic, TypeVar, cast
 from pydantic import BaseModel, Field
 
 from .eval_types import Evals, EvalsFile, FixtureDefinition
-from .utils import EvalSummary
+from .executor import Executor
+from .utils import EvalSummary, EvalsBundle
 from .utils import run_evals as _run_evals
 
 _T = TypeVar("_T", bound=Any)
@@ -129,7 +130,7 @@ class Function(BaseModel, Generic[_RT]):
             code = code.replace('\\"', '"').replace("\\'", "'")
 
         # 2. Remove typing imports of builtin generics
-        _BUILTIN_GENERICS = {
+        _builtin_generics = {
             "Dict",
             "List",
             "Tuple",
@@ -146,7 +147,7 @@ class Function(BaseModel, Generic[_RT]):
 
         def _clean_typing_import(m: _re.Match) -> str:
             names = [n.strip() for n in m.group(1).split(",")]
-            remaining = [n for n in names if n not in _BUILTIN_GENERICS]
+            remaining = [n for n in names if n not in _builtin_generics]
             if not remaining:
                 return ""  # remove the entire import line
             return f"from typing import {', '.join(remaining)}"
@@ -281,7 +282,7 @@ class RunEvals:
 
     def __init__(
         self,
-        source: str | Path | dict | EvalsFile | Evals | Sequence[Evals],
+        source: str | Path | dict | EvalsFile | EvalsBundle | Evals | Sequence[Evals],
         *,
         functions: dict[str, Callable] | None = None,
         filter_funcs: list[str] | None = None,
@@ -292,6 +293,8 @@ class RunEvals:
             dict[str, Callable | tuple[Callable, Callable | None] | FixtureDefinition] | None
         ) = None,
         ignore_duration: bool = False,
+        executor: Executor | None = None,
+        fallback_executor: Executor | None = None,
     ):
         self._source = source
         self._functions = functions or {}
@@ -301,6 +304,8 @@ class RunEvals:
         self._serial_fn = serial_fn or {}
         self._fixtures = fixtures or {}
         self._ignore_duration = ignore_duration
+        self._executor = executor
+        self._fallback_executor = fallback_executor
 
     @classmethod
     def from_file(cls, path: str | Path) -> "RunEvals":
@@ -317,6 +322,22 @@ class RunEvals:
             RunEvals.from_file("evals.yml").run()
         """
         return cls(str(path))
+
+    @classmethod
+    def from_bundle(cls, bundle: EvalsBundle) -> "RunEvals":
+        """
+        Create from a EvalsBundle object.
+
+        Args:
+            bundle: EvalsBundle object
+
+        Returns:
+            RunEvals instance
+
+        Example:
+            RunEvals.from_bundle(bundle).run()
+        """
+        return cls(bundle)
 
     @classmethod
     def from_source(cls, source: str | dict | EvalsFile) -> "RunEvals":
@@ -565,6 +586,8 @@ class RunEvals:
             serial_fn=self._serial_fn,
             fixtures=self._fixtures,
             ignore_duration=self._ignore_duration,
+            executor=self._executor,
+            fallback_executor=self._fallback_executor,
         )
 
     def ignore_duration(self) -> "RunEvals":
@@ -578,4 +601,15 @@ class RunEvals:
             summary = RunEvals.from_file("evals.yml").ignore_duration().run()
         """
         self._ignore_duration = True
+        return self
+
+    def with_executor(
+        self,
+        executor: Executor | None = None,
+        *,
+        fallback_executor: Executor | None = None,
+    ) -> "RunEvals":
+        """Store executor preferences for downstream execution-aware flows."""
+        self._executor = executor
+        self._fallback_executor = fallback_executor
         return self

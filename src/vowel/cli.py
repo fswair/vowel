@@ -740,7 +740,7 @@ def main(
     if export_json:
         import json
 
-        json_data = summary.json()
+        json_data = summary.to_json()
         with open(export_json, "w") as f:
             json.dump(json_data, f, indent=2)
         if not quiet:
@@ -749,6 +749,10 @@ def main(
     # Failed assertions detail
     if summary.failed_results:
         console.print()
+
+        all_failures_are_duration = True
+        has_any_failures = False
+
         for result in summary.failed_results:
             console.print(Panel(result.eval_id, title="Failed Assertions", border_style="yellow"))
 
@@ -758,6 +762,7 @@ def main(
                 ]
 
                 if failed_assertions:
+                    has_any_failures = True
                     total_assertions = len(case.assertions)
                     failed_count = len(failed_assertions)
 
@@ -767,12 +772,32 @@ def main(
                     )
 
                     for assertion_name, res in failed_assertions:
+                        if (
+                            "duration" not in assertion_name.lower()
+                            and "maxduration" not in assertion_name.lower()
+                        ):
+                            all_failures_are_duration = False
+
                         console.print(f"\n    [red]x {assertion_name}[/red]")
                         if res.reason:
                             reason_lines = str(res.reason).split("\n")
                             for line in reason_lines:
                                 if line.strip():
                                     console.print(f"       [dim]{line.strip()}[/dim]")
+
+        # Inform user if all errors are just duration errors
+        if has_any_failures and all_failures_are_duration:
+            console.print()
+            console.print(
+                Panel(
+                    "All failing evaluators are related to duration (MaxDuration). "
+                    "You can run the command with `--ignore-duration` to skip performance constraints "
+                    "and get a more accurate evaluation of functional correctness.",
+                    title="Insight",
+                    border_style="cyan",
+                    style="cyan",
+                )
+            )
 
     console.print()
 

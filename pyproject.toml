@@ -55,7 +55,9 @@ logfire = [
 ]
 
 monty = [
-    "pydantic-monty>=0.0.7"
+    "pydantic-monty>=0.0.8"
+    # i have decided to pin working version
+    # because of new changes to MontyRepl in version 0.0.8
 ]
 optimize = [
     "vowel-optimization"
@@ -84,7 +86,7 @@ target-version = ["py311"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-exclude = ["vowel-optimization"]
+exclude = ["vowel-optimization", "benchmark_v1"]
 
 [tool.ruff.lint]
 select = [
@@ -118,7 +120,7 @@ ignore_missing_imports = true
 python-version = "3.11"
 
 [tool.ty.src]
-exclude = ["vowel-optimization"]
+exclude = ["vowel-optimization", "benchmark_v1"]
 
 [tool.ty.rules]
 unresolved-import = "ignore"
@@ -141,4 +143,9 @@ markers = [
     "evaluators: tests for specific evaluator types",
     "integration: integration tests",
     "llm: tests that require LLM API calls",
+]
+
+[tool.uv.workspace]
+members = [
+    "pydantic-acp",
 ]

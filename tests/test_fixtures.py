@@ -107,6 +107,7 @@ class TestValidateFixtureSignature:
 
 _db_instances = []
 _cache_instances = []
+_session_fixture_events: list[str] = []
 
 
 def setup_db(host: str = "localhost", port: int = 5432):
@@ -134,11 +135,23 @@ def teardown_cache(instance):
     _cache_instances.remove(instance)
 
 
+def setup_session_counter():
+    """Track session fixture setup calls."""
+    _session_fixture_events.append("setup")
+    return {"bonus": 10}
+
+
+def teardown_session_counter(instance):
+    """Track session fixture teardown calls."""
+    _session_fixture_events.append(f"teardown:{instance['bonus']}")
+
+
 class TestFixtureManager:
     def setup_method(self):
         """Clear instances before each test."""
         _db_instances.clear()
         _cache_instances.clear()
+        _session_fixture_events.clear()
 
     def test_setup_function_scope(self):
         """Should setup function-scoped fixture."""
@@ -340,6 +353,18 @@ examples.functions.add_numbers:
 
         assert evals.fixture == ["db"]
 
+    def test_load_bundle_prefers_existing_file_before_yaml_heuristic(self, monkeypatch):
+        """Existing file paths should not be misclassified as inline YAML."""
+        import vowel.utils as utils
+
+        monkeypatch.setattr(utils.os.path, "exists", lambda path: True)
+        monkeypatch.setattr(utils, "load_bundle_file", lambda path: ("file", path))
+        monkeypatch.setattr(utils, "load_bundle_from_yaml_string", lambda src: ("yaml", src))
+
+        result = utils.load_bundle(r"C:\tmp\spec.yml")
+
+        assert result == ("file", r"C:\tmp\spec.yml")
+
 
 def function_with_db(a: int, b: int, *, db: dict) -> int:
     """Test function that uses a db fixture."""
@@ -352,6 +377,7 @@ class TestIntegration:
     def setup_method(self):
         _db_instances.clear()
         _cache_instances.clear()
+        _session_fixture_events.clear()
 
     def test_fixture_injection_valid_signature(self):
         """Should validate and use fixtures correctly."""
@@ -386,6 +412,7 @@ class TestProgrammaticFixtures:
     def setup_method(self):
         _db_instances.clear()
         _cache_instances.clear()
+        _session_fixture_events.clear()
 
     def test_with_fixtures_setup_only(self):
         """Should work with setup-only fixtures via with_fixtures."""
@@ -519,6 +546,84 @@ add_with_db:
 
         assert not summary.all_passed
         assert summary.error_count == 1
+
+    def test_session_scope_fixture_runs_setup_and_teardown_once_per_eval_run(self):
+        """Session-scoped fixtures should setup once and teardown once across all cases."""
+        yaml_content = """
+add_with_db:
+  fixture:
+    - db
+  dataset:
+    - case:
+        inputs: {a: 1, b: 2}
+        expected: 13
+    - case:
+        inputs: {a: 3, b: 4}
+        expected: 17
+"""
+
+        summary = (
+            RunEvals.from_source(yaml_content)
+            .with_functions({"add_with_db": add_with_db})
+            .with_fixtures(
+                {
+                    "db": FixtureDefinition(
+                        setup="test_fixtures.setup_session_counter",
+                        teardown="test_fixtures.teardown_session_counter",
+                        scope="session",
+                    )
+                }
+            )
+            .run()
+        )
+
+        assert summary.all_passed
+        assert _session_fixture_events == ["setup", "teardown:10"]
+
+    def test_session_scope_fixture_is_shared_across_multiple_functions(self):
+        """Session-scoped fixtures should teardown once after the full run ends."""
+        yaml_content = """
+add_with_db:
+  fixture:
+    - db
+  dataset:
+    - case:
+        inputs: {a: 1, b: 2}
+        expected: 13
+subtract_with_db:
+  fixture:
+    - db
+  dataset:
+    - case:
+        inputs: {a: 10, b: 3}
+        expected: 17
+"""
+
+        def subtract_with_db(a: int, b: int, *, db: dict) -> int:
+            return a - b + db["bonus"]
+
+        summary = (
+            RunEvals.from_source(yaml_content)
+            .with_functions(
+                {
+                    "add_with_db": add_with_db,
+                    "subtract_with_db": subtract_with_db,
+                }
+            )
+            .with_fixtures(
+                {
+                    "db": FixtureDefinition(
+                        setup="test_fixtures.setup_session_counter",
+                        teardown="test_fixtures.teardown_session_counter",
+                        scope="session",
+                    )
+                }
+            )
+            .run()
+        )
+
+        assert summary.all_passed
+        assert _session_fixture_events == ["setup", "teardown:10"]
 
 
 def setup_db_with_args(host: str, port: int):

@@ -206,6 +206,25 @@ def helper(x):
             sys.path = original_path
             os.chdir(original_cwd)
 
+    def test_import_local_module_does_not_mutate_sys_path(self, tmp_path, monkeypatch):
+        """Local imports should not leave the working directory on sys.path."""
+        module_file = tmp_path / "my_module.py"
+        module_file.write_text(
+            """
+def my_function(x):
+    return x * 2
+"""
+        )
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(sys, "path", [p for p in sys.path if p != str(tmp_path)])
+        before = sys.path.copy()
+
+        func = import_function("my_module.my_function")
+
+        assert func(5) == 10
+        assert sys.path == before
+
 
 class TestImportErrors:
     """Tests for import error handling."""

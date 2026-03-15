@@ -31,7 +31,7 @@ from pydantic_ai import Agent
 
 from vowel.context import EVAL_SPEC_CONTEXT
 from vowel.eval_types import EvalsSource
-from vowel.executor import ExecutionResult, Executor, get_executor
+from vowel.executor import ExecutionResult, Executor, resolve_executors
 from vowel.monitoring import enable_monitoring
 from vowel.runner import Function, RunEvals
 from vowel.spec_validation import (
@@ -192,16 +192,29 @@ class CodeModeGenerator:
 
     def __init__(
         self,
-        model: str | None = None,
-        executor: Executor | None = None,
+        spec_model: str | None = None,
+        exploration_model: str | None = None,
+        default_executor: Executor | None = None,
+        fallback_executor: Executor | None = None,
         additional_context: str = "",
         min_snippets: int = 15,
         **opts,
     ) -> None:
-        self.model = model or os.getenv("MODEL_NAME", "")
-        if not self.model:
-            logfire.warn("No model specified; set MODEL_NAME env var or pass model=")
-        self.executor = executor or get_executor("auto")
+        # Default fallback from kwargs (for backwards compatibility) or environment
+        base_fallback = opts.pop("model", None) or os.getenv("MODEL_NAME", "")
+
+        self.spec_model = spec_model or os.getenv("SPEC_MODEL") or base_fallback
+        self.exploration_model = (
+            exploration_model or os.getenv("EXPLORATION_MODEL") or base_fallback
+        )
+
+        if not self.spec_model or not self.exploration_model:
+            raise ValueError(
+                "Both spec_model and exploration_model must be specified. "
+                "Provide them via constructor/kwargs, or set SPEC_MODEL, EXPLORATION_MODEL, or MODEL_NAME environment variables."
+            )
+
+        self.executor = resolve_executors(default_executor, fallback_executor)
         self.additional_context = additional_context
         self.min_snippets = min_snippets
         self._opts = opts
@@ -212,7 +225,8 @@ class CodeModeGenerator:
 
         logfire.info(
             "CodeModeGenerator initialized",
-            model=self.model,
+            spec_model=self.spec_model,
+            exploration_model=self.exploration_model,
             executor=type(self.executor).__name__,
         )
 
@@ -222,7 +236,7 @@ class CodeModeGenerator:
     def explorer_agent(self) -> Agent[None, ExplorationPlan]:
         if self._explorer_agent is None:
             self._explorer_agent = Agent(
-                self.model,
+                self.exploration_model,
                 output_type=ExplorationPlan,
                 system_prompt=self._explorer_system_prompt(),
                 **self._opts,
@@ -233,7 +247,7 @@ class CodeModeGenerator:
     def spec_agent(self) -> Agent[None, EvalsSource]:
         if self._spec_agent is None:
             self._spec_agent = Agent(
-                self.model,
+                self.spec_model,
                 output_type=EvalsSource,
                 system_prompt=self._spec_system_prompt(),
                 **self._opts,
@@ -306,12 +320,21 @@ The execution results are ground-truth from running the real function."""
     async def explore(
         self,
         func: Function,
+        *,
+        exploration_rounds: int = 2,
     ) -> list[SnippetResult]:
         """Phase 1: Generate and execute exploration snippets.
 
-        Uses ``create_session()`` to compile the function source **once**,
-        then feeds each snippet against the preserved runtime state —
-        zero re-parse overhead per snippet.
+        Supports multi-round feedback-guided exploration.  Round 1 uses
+        static reasoning (speculation-based).  Round 2+ receives a
+        programmatic cluster summary of prior results so the LLM can
+        target unexplored behaviour classes (evidence-based).
+
+        Parameters
+        ----------
+        exploration_rounds:
+            Number of exploration rounds (default 2).  Set to 1 to
+            restore single-shot behaviour.
 
         Returns a list of ``SnippetResult`` with real outputs from the
         executor.
@@ -320,63 +343,178 @@ The execution results are ground-truth from running the real function."""
             "codemode.explore",
             func_name=func.name,
             executor=type(self.executor).__name__,
+            exploration_rounds=exploration_rounds,
         ):
-            # 1. Ask the LLM for exploration snippets
-            plan = await self._get_exploration_plan(func)
+            all_results: list[SnippetResult] = []
 
-            # 2. Compile function source once, feed each snippet
-            all_snippets = [
-                *((s, "normal") for s in plan.snippets),
-                *((s, "error") for s in plan.error_snippets),
-            ]
-            total = len(all_snippets)
-            results: list[SnippetResult] = []
-            with self.executor.create_session(func.code) as session:
-                for i, (snippet, kind) in enumerate(all_snippets):
-                    with logfire.span(
-                        "codemode.execute_snippet",
-                        index=i,
-                        kind=kind,
-                        description=snippet.description,
-                    ):
-                        logfire.info(
-                            "Executing snippet {index}/{total} [{kind}]: {description}",
-                            index=i + 1,
-                            total=total,
-                            kind=kind,
-                            description=snippet.description,
-                            code=snippet.code,
+            for round_num in range(1, exploration_rounds + 1):
+                with logfire.span(
+                    "codemode.explore_round",
+                    round=round_num,
+                    prior_results=len(all_results),
+                ):
+                    # Get exploration plan (round 2+ includes prior context)
+                    if round_num == 1:
+                        plan = await self._get_exploration_plan(func)
+                    else:
+                        cluster_summary = self._build_cluster_summary(all_results)
+                        plan = await self._get_targeted_exploration_plan(
+                            func,
+                            all_results,
+                            cluster_summary,
                         )
+                        # Early exit: if no new snippets were produced
+                        if not plan.snippets and not plan.error_snippets:
+                            logfire.info(
+                                "Round {round} produced no new snippets, stopping",
+                                round=round_num,
+                            )
+                            break
 
-                        exec_result = session.feed(snippet.code)
+                    # Execute snippets
+                    new_results = self._execute_plan(func, plan, round_num)
+                    all_results.extend(new_results)
 
-                        sr = SnippetResult.from_execution(snippet, exec_result)
-                        results.append(sr)
-
+                    # Early exit: round 2+ found no new behaviour
+                    if round_num > 1:
+                        new_behaviors = self._count_new_behaviors(
+                            all_results[: -len(new_results)],
+                            new_results,
+                        )
                         logfire.info(
-                            "Snippet result: success={success}, output={output}, "
-                            "duration={duration_ms:.2f}ms",
-                            success=sr.success,
-                            output=repr(sr.output)[:200],
-                            duration_ms=sr.duration_ms,
-                            error=sr.error,
-                            error_type=sr.error_type,
+                            "Round {round}: {new} new behaviour classes discovered",
+                            round=round_num,
+                            new=new_behaviors,
                         )
 
             # Summary log
-            successes = sum(1 for r in results if r.success)
-            failures = len(results) - successes
+            successes = sum(1 for r in all_results if r.success)
+            failures = len(all_results) - successes
             logfire.info(
                 "Exploration complete: {successes} succeeded, {failures} raised errors",
                 successes=successes,
                 failures=failures,
             )
 
-            return results
+            return all_results
+
+    def _execute_plan(
+        self,
+        func: Function,
+        plan: ExplorationPlan,
+        round_num: int = 1,
+    ) -> list[SnippetResult]:
+        """Execute all snippets in a plan and return results."""
+        all_snippets = [
+            *((s, "normal") for s in plan.snippets),
+            *((s, "error") for s in plan.error_snippets),
+        ]
+        total = len(all_snippets)
+        results: list[SnippetResult] = []
+        with self.executor.create_session(func.code) as session:
+            for i, (snippet, kind) in enumerate(all_snippets):
+                with logfire.span(
+                    "codemode.execute_snippet",
+                    index=i,
+                    kind=kind,
+                    round=round_num,
+                    description=snippet.description,
+                ):
+                    logfire.info(
+                        "Executing snippet {index}/{total} R{round} [{kind}]: {description}",
+                        index=i + 1,
+                        total=total,
+                        round=round_num,
+                        kind=kind,
+                        description=snippet.description,
+                        code=snippet.code,
+                    )
+
+                    exec_result = session.feed(snippet.code)
+
+                    sr = SnippetResult.from_execution(snippet, exec_result)
+                    results.append(sr)
+
+                    logfire.info(
+                        "Snippet result: success={success}, output={output}, "
+                        "duration={duration_ms:.2f}ms",
+                        success=sr.success,
+                        output=repr(sr.output)[:200],
+                        duration_ms=sr.duration_ms,
+                        error=sr.error,
+                        error_type=sr.error_type,
+                    )
+        return results
+
+    @staticmethod
+    def _build_cluster_summary(results: list[SnippetResult]) -> str:
+        """Build a deterministic cluster summary from exploration results.
+
+        Groups results by output type / error type and formats a concise
+        summary for the Round 2 exploration prompt.
+        """
+        # -- Success clusters --
+        success_types: dict[str, int] = {}
+        for r in results:
+            if r.success:
+                t = type(r.output).__name__
+                success_types[t] = success_types.get(t, 0) + 1
+
+        # -- Error clusters --
+        error_clusters: dict[str, list[str]] = {}
+        for r in results:
+            if not r.success and r.error_type:
+                msgs = error_clusters.setdefault(r.error_type, [])
+                prefix = (r.error or "")[:60]
+                if prefix not in msgs:
+                    msgs.append(prefix)
+
+        # -- Already-tried snippets (to avoid repeats) --
+        tried_codes = [r.code.strip() for r in results]
+
+        lines = ["## Observed Behaviour Clusters\n"]
+
+        lines.append("### Success clusters")
+        if success_types:
+            for t, count in sorted(success_types.items()):
+                lines.append(f"- output type `{t}`: {count} cases")
+        else:
+            lines.append("- (none)")
+
+        lines.append("\n### Error clusters")
+        if error_clusters:
+            for etype, msgs in sorted(error_clusters.items()):
+                lines.append(f"- `{etype}` ({len(msgs)} distinct messages):")
+                for m in msgs:
+                    lines.append(f'  - "{m}"')
+        else:
+            lines.append("- (none)")
+
+        lines.append(f"\n### Already tried ({len(tried_codes)} snippets — do NOT repeat these)")
+        for code in tried_codes:
+            lines.append(f"- `{code}`")
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def _count_new_behaviors(
+        prior: list[SnippetResult],
+        new: list[SnippetResult],
+    ) -> int:
+        """Count how many new behaviour classes the new results introduced."""
+
+        def _behavior_key(r: SnippetResult) -> str:
+            if r.success:
+                return f"ok:{type(r.output).__name__}"
+            return f"err:{r.error_type}:{(r.error or '')[:40]}"
+
+        prior_keys = {_behavior_key(r) for r in prior}
+        new_keys = {_behavior_key(r) for r in new}
+        return len(new_keys - prior_keys)
 
     async def _get_exploration_plan(self, func: Function) -> ExplorationPlan:
-        """Ask the LLM for exploration snippets."""
-        with logfire.span("codemode.llm_explore", func_name=func.name):
+        """Ask the LLM for exploration snippets (Round 1 — static reasoning)."""
+        with logfire.span("codemode.llm_explore", func_name=func.name, round=1):
             prompt = f"""Explore the following function by writing test snippets:
 
 <FunctionName>{func.name}</FunctionName>
@@ -393,7 +531,58 @@ behaviour across all important scenarios.  Use the real function name
             plan = result.output
 
             logfire.info(
-                "LLM produced {normal} normal + {error} error snippets",
+                "Round 1: LLM produced {normal} normal + {error} error snippets",
+                normal=len(plan.snippets),
+                error=len(plan.error_snippets),
+                snippets=[s.description for s in plan.snippets],
+                error_snippets=[s.description for s in plan.error_snippets],
+            )
+            return plan
+
+    async def _get_targeted_exploration_plan(
+        self,
+        func: Function,
+        prior_results: list[SnippetResult],
+        cluster_summary: str,
+    ) -> ExplorationPlan:
+        """Ask the LLM for targeted snippets (Round 2 — evidence-based)."""
+        with logfire.span("codemode.llm_explore", func_name=func.name, round=2):
+            prompt = f"""You previously explored `{func.name}` and the snippets were
+executed.  Below are the ACTUAL results and a cluster summary.
+
+Your job now is to find **new behaviour classes** that were NOT covered
+in Round 1.  Focus on:
+- Syntax / input combinations not yet tried
+- Edge cases at boundaries between observed clusters
+- Error paths whose exact error type or message differs from expectation
+- Interactions between parameters / sub-expressions
+
+<FunctionName>{func.name}</FunctionName>
+<FunctionCode>
+{func.code}
+</FunctionCode>
+<Description>{func.description}</Description>
+
+<Round1Results>
+{chr(10).join(r.to_context_block() for r in prior_results)}
+</Round1Results>
+
+<ClusterSummary>
+{cluster_summary}
+</ClusterSummary>
+
+RULES:
+- Do NOT repeat any snippet from the "Already tried" list.
+- Produce 8–12 NEW normal snippets targeting uncovered behaviour.
+- Produce 3–5 NEW error snippets targeting untried error paths.
+- Same strict rules as before: no try/except, real function name,
+  one scenario per snippet, last expression captured."""
+
+            result = await self.explorer_agent.run(prompt)
+            plan = result.output
+
+            logfire.info(
+                "Round 2: LLM produced {normal} normal + {error} error snippets",
                 normal=len(plan.snippets),
                 error=len(plan.error_snippets),
                 snippets=[s.description for s in plan.snippets],
@@ -471,13 +660,21 @@ Each one MUST become a `raises:` case in the spec — no exceptions.
 </ErrorResults>
 
 REQUIREMENTS:
-- Use {func.name} as eval_id.
+- The top-level YAML key MUST be `{func.name}` (the function name).
 - Generate at least {max(len(exploration_results), 5)} diverse test cases.
 - Use the EXACT outputs from the execution results above.
 - You MUST generate exactly {len(error_results)} raises cases — one for
   each RAISED result above.  The spec is invalid without them.
 - Cover normal, edge, and error cases.
 - In assertions, use `input` (NOT `inputs`) for accessing input values.
+
+YAML FORMAT — STRICT RULES (violations cause parse failure):
+- NEVER use YAML tags: `!!python/tuple`, `!!python/object`, `!!binary`,
+  `!!omap`, `!!str`, `!!int`, `!!float`, or ANY `!!` tag whatsoever.
+  Plain YAML scalars and sequences only.  `yaml.safe_load()` will be used
+  to parse the output — it rejects all `!!` tags and will hard-fail.
+- Represent tuples as YAML sequences (lists).
+- NEVER emit `!!python/...` or any non-standard YAML type annotation.
 {refinement_block}"""
 
             logfire.info(
@@ -490,11 +687,13 @@ REQUIREMENTS:
             result = await self.spec_agent.run(prompt)
             yaml_spec = result.output.yaml_spec
 
-            # Sanitize: strip YAML tags that safe_load rejects
+            # Sanitize: strip ALL !!<tag> annotations — safe_load only accepts
+            # a tiny subset (str/int/float/bool/null/seq/map) and rejects
+            # anything else (!!python/tuple, !!binary, !!omap, etc.).
+            # Stripping them is safe: scalar values fall back to plain YAML types.
             import re
 
-            yaml_spec = re.sub(r"!!python/[\w.:]+", "", yaml_spec)
-            yaml_spec = re.sub(r"!!binary\b", "", yaml_spec)
+            yaml_spec = re.sub(r"!![^\s\[\]{},]+", "", yaml_spec)
 
             # Validate YAML syntax
             yaml.safe_load(yaml_spec)
@@ -581,15 +780,18 @@ REQUIREMENTS:
 
         Pipeline::
 
-            Phase 1: explore()                        (once)
+            Phase 1: explore()                        (2 rounds by default)
+              Round 1 — static reasoning (speculation-based)
+              Round 2 — targeted exploration (evidence-based)
             Phase 2: generate_spec()                  (may loop)
             Phase 3: validate via RunEvals            (per attempt)
             Phase 4: refine on failure                (up to N rounds)
             Phase 5: inject_durations()               (once, at end)
 
-        Exploration (Phase 1) runs once — the ground-truth snippet results
-        don't change.  Only spec generation (Phase 2) is re-run on failure,
-        with a failure report injected into the prompt.
+        Exploration (Phase 1) runs in two rounds.  Round 1 uses static
+        reasoning; Round 2 receives a cluster summary of Round 1 results
+        and targets uncovered behaviour classes.  Only spec generation
+        (Phase 2) is re-run on validation failure.
 
         Parameters
         ----------
@@ -618,7 +820,8 @@ REQUIREMENTS:
         with logfire.span(
             "codemode.pipeline",
             func_name=func.name,
-            model=self.model,
+            spec_model=self.spec_model,
+            exploration_model=self.exploration_model,
             executor=type(self.executor).__name__,
         ):
             t0 = time.perf_counter()
@@ -726,7 +929,7 @@ REQUIREMENTS:
 
             elapsed = (time.perf_counter() - t0) * 1000
             logfire.info(
-                "CodeMode pipeline complete in {elapsed:.0f}ms (refinements={rounds})",
+                "CodeMode pipeline complete in {elapsed:.0f}ms (refinements={refinement_rounds})",
                 elapsed=elapsed,
                 func_name=func.name,
                 exploration_count=len(exploration_results),

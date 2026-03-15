@@ -45,6 +45,7 @@ from .executor import (
     MontyExecutor,
     MontyReplSession,
     get_executor,
+    resolve_executors,
 )
 from .runner import Function, RunEvals
 from .utils import (
@@ -93,6 +94,7 @@ __all__ = [
     "DefaultExecutor",
     "DefaultSession",
     "get_executor",
+    "resolve_executors",
     # CodeMode pipeline
     "CodeModeGenerator",
     "CodeModeResult",

@@ -20,13 +20,13 @@ Container models:
     EvalsFile: Root model for YAML file parsing
 """
 
-import logfire
 import os
+import typing
 from typing import Any, Literal
 
+import logfire
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.experimental.missing_sentinel import MISSING
-
 
 # =============================================================================
 # LLM Output Models
@@ -105,6 +105,63 @@ _EXAMPLE_GET_CLOSE_MATCHES = """get_close_matches:
         inputs: ["test", ["test1", "test2", "test3", "test4"], 2, 0.1]
         assertion: "len(output) == 2"
 """
+
+SAFE_ASSERTION_BUILTINS = {
+    "abs": abs,
+    "all": all,
+    "any": any,
+    "bool": bool,
+    "dict": dict,
+    "enumerate": enumerate,
+    "float": float,
+    "int": int,
+    "isinstance": isinstance,
+    "len": len,
+    "list": list,
+    "max": max,
+    "min": min,
+    "range": range,
+    "round": round,
+    "set": set,
+    "sorted": sorted,
+    "str": str,
+    "sum": sum,
+    "tuple": tuple,
+    "type": type,
+    "zip": zip,
+}
+
+SAFE_TYPE_NAMES: dict[str, Any] = {
+    "Any": Any,
+    "None": None,
+    "bool": bool,
+    "bytes": bytes,
+    "dict": dict,
+    "float": float,
+    "frozenset": frozenset,
+    "int": int,
+    "list": list,
+    "object": object,
+    "set": set,
+    "str": str,
+    "tuple": tuple,
+    "typing": typing,
+}
+SAFE_TYPE_NAMES.update(
+    {name: getattr(typing, name) for name in dir(typing) if not name.startswith("_")}
+)
+
+
+def _eval_assertion_restricted(assertion: str, env: dict[str, Any]) -> bool:
+    namespace = {"__builtins__": SAFE_ASSERTION_BUILTINS}
+    namespace.update(env)
+    return bool(eval(assertion, namespace, namespace))
+
+
+def _eval_type_restricted(type_expr: str) -> Any:
+    namespace = {"__builtins__": {}}
+    namespace.update(SAFE_TYPE_NAMES)
+    return eval(type_expr, namespace, namespace)
 
 
 class EvalsSource(BaseModel):
@@ -203,7 +260,11 @@ class IsInstanceCase(BaseModel):
     )
 
     def evaluate(self, output: Any) -> bool:
-        return isinstance(output, eval(self.type))
+        try:
+            expected = _eval_type_restricted(self.type)
+        except Exception:
+            expected = eval(self.type)
+        return isinstance(output, expected)
 
 
 class AssertionCase(BaseModel):
@@ -258,7 +319,10 @@ class AssertionCase(BaseModel):
 
     def evaluate(self, input: Any, output: Any) -> bool:
         env = {"input": input, "output": output}
-        return eval(self.assertion, env, env)
+        try:
+            return _eval_assertion_restricted(self.assertion, env)
+        except Exception:
+            return bool(eval(self.assertion, env, env))
 
 
 class DurationCase(BaseModel):
@@ -774,7 +838,7 @@ class EvalsFile(BaseModel):
 
     def get_evals(self) -> dict[str, Evals]:
         result = {}
-        extras = getattr(self, "__pydantic_extra__", None) or {}
+        extras = getattr(self, "__pydantic_extra__", {})
         for key, value in extras.items():
             if key == "fixtures":
                 continue

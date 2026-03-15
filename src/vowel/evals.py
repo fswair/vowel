@@ -23,12 +23,70 @@ import typing
 from contextlib import suppress
 from dataclasses import dataclass
 
+import logfire
 from pydantic import ValidationError
 from pydantic.type_adapter import TypeAdapter
 from pydantic_ai.settings import ModelSettings
 from pydantic_evals.evaluators import EvaluationReason, Evaluator, EvaluatorContext, LLMJudge
 
 MONTY_AVAILABLE = bool(importlib.util.find_spec("pydantic-monty"))
+
+SAFE_ASSERTION_BUILTINS = {
+    "abs": abs,
+    "all": all,
+    "any": any,
+    "bool": bool,
+    "dict": dict,
+    "enumerate": enumerate,
+    "float": float,
+    "int": int,
+    "isinstance": isinstance,
+    "len": len,
+    "list": list,
+    "max": max,
+    "min": min,
+    "range": range,
+    "round": round,
+    "set": set,
+    "sorted": sorted,
+    "str": str,
+    "sum": sum,
+    "tuple": tuple,
+    "type": type,
+    "zip": zip,
+}
+
+SAFE_TYPE_NAMES = {
+    "Any": typing.Any,
+    "None": None,
+    "bool": bool,
+    "bytes": bytes,
+    "dict": dict,
+    "float": float,
+    "frozenset": frozenset,
+    "int": int,
+    "list": list,
+    "object": object,
+    "set": set,
+    "str": str,
+    "tuple": tuple,
+    "typing": typing,
+}
+SAFE_TYPE_NAMES.update(
+    {name: getattr(typing, name) for name in dir(typing) if not name.startswith("_")}
+)
+
+
+def _eval_assertion_restricted(condition: str, inputs: dict[str, typing.Any]) -> bool:
+    env = {"__builtins__": SAFE_ASSERTION_BUILTINS}
+    env.update(inputs)
+    return bool(eval(condition, env, env))
+
+
+def _eval_type_restricted(type_expr: str) -> typing.Any:
+    env = {"__builtins__": {}}
+    env.update(SAFE_TYPE_NAMES)
+    return eval(type_expr, env, env)
 
 
 def prepare_env_and_condition(ctx: EvaluatorContext, condition: str) -> tuple[dict, str]:
@@ -123,6 +181,20 @@ class AssertionEvaluator(Evaluator):
                 )
 
         except Exception:
+            pass
+
+        try:
+            if _eval_assertion_restricted(self.condition, inputs):
+                return EvaluationReason(
+                    value=True, reason=f"Assertion passed for condition: {condition}"
+                )
+        except Exception as exc:
+            logfire.info(
+                "Restricted assertion eval failed; falling back to raw eval",
+                condition=self.condition,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
             with suppress(Exception):
                 if eval(self.condition, inputs, inputs):
                     return EvaluationReason(
@@ -147,15 +219,8 @@ class TypeAdapterEvaluator(Evaluator):
         """Validate that output matches the expected type."""
         if isinstance(ctx.output, dict) and "_exception" in ctx.output:
             return EvaluationReason(value=True, reason="Skipped (exception case)")
-        type_env = {
-            "typing": typing,
-            "__import__": None,
-            "eval": None,
-            "exec": None,
-            "compile": None,
-        }
         try:
-            expected_type = eval(self.type, type_env, type_env)
+            expected_type = _eval_type_restricted(self.type)
             ta = TypeAdapter(expected_type)
         except Exception:
             return EvaluationReason(
@@ -325,7 +390,9 @@ class RaisesEvaluator(Evaluator):
             )
         if self.expected_exception_match:
             exception_message = str(actual_exception)
-            if not re.search(self.expected_exception_match, exception_message, re.I):
+            if self.expected_exception_match != exception_message and not re.search(
+                self.expected_exception_match, exception_message, re.I
+            ):
                 return EvaluationReason(
                     value=False,
                     reason=(

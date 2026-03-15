@@ -79,6 +79,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, runtime_checkable
 
+import logfire as _logfire
+
 NEST_AVAILABLE = importlib.util.find_spec("nest_asyncio") is not None
 MONTY_AVAILABLE = importlib.util.find_spec("pydantic_monty") is not None
 
@@ -298,12 +300,9 @@ class MontyReplSession:
         def _print_callback(_stream: str, text: str) -> None:
             stdout_lines.append(text)
 
-        # Compile + execute setup code (function definitions, imports, etc.)
-        self._repl, _init_output = pydantic_monty.MontyRepl.create(
-            setup_code,
-            limits=self._limits,
-            print_callback=_print_callback,
-        )
+        # Create empty REPL and initialize it with setup code
+        self._repl = pydantic_monty.MontyRepl(limits=self._limits)
+        self._repl.feed_run(setup_code, print_callback=_print_callback)
         self._setup_stdout = "\n".join(stdout_lines)
 
     def feed(self, code: str) -> ExecutionResult:
@@ -315,11 +314,11 @@ class MontyReplSession:
 
         t0 = time.perf_counter()
         try:
-            if not self._repl:
+            if not getattr(self, "_repl", None):
                 # TODO: wrap with custom exception and detailed message
                 raise ValueError("Repl not found.")
             else:
-                output = self._repl.feed(code, print_callback=_print_callback)
+                output = self._repl.feed_run(code, print_callback=_print_callback)
                 duration_ms = (time.perf_counter() - t0) * 1000
                 return ExecutionResult(
                     output=output,
@@ -364,7 +363,8 @@ class MontyReplSession:
 
     def close(self) -> None:
         """Release the REPL instance."""
-        self._repl = None  # type: ignore[assignment]
+        # TODO: not sure about releasing the REPL instance is needed
+        # self._repl = None  # type: ignore
 
     def __enter__(self) -> MontyReplSession:
         return self
@@ -376,8 +376,6 @@ class MontyReplSession:
 # ---------------------------------------------------------------------------
 # FallbackSession — Monty with auto-fallback to DefaultSession
 # ---------------------------------------------------------------------------
-
-import logfire as _logfire
 
 
 class FallbackSession:
@@ -401,12 +399,14 @@ class FallbackSession:
         *,
         timeout: float = 5.0,
         max_memory: int = 10 * 1024 * 1024,
+        fallback_executor: Executor | None = None,
     ) -> None:
         self._setup_code = setup_code
         self._timeout = timeout
         self._max_memory = max_memory
+        self._fallback_executor = fallback_executor or DefaultExecutor()
         self._monty_session: MontyReplSession | None = None
-        self._default_session: DefaultSession | None = None
+        self._fallback_session: ExecutionSession | None = None
         self._monty_failed_permanently = False
 
         try:
@@ -417,52 +417,54 @@ class FallbackSession:
             )
         except Exception as exc:
             _logfire.info(
-                "Monty session creation failed ({exc_type}: {exc_msg}), falling back to DefaultSession",
+                "Monty session creation failed ({exc_type}: {exc_msg}), falling back to {fallback}",
                 exc_type=type(exc).__name__,
                 exc_msg=str(exc),
+                fallback=type(self._fallback_executor).__name__,
             )
             self._monty_failed_permanently = True
-            self._default_session = DefaultSession(
+            self._fallback_session = self._fallback_executor.create_session(
                 setup_code,
                 timeout=timeout,
                 max_memory=max_memory,
             )
 
-    def _get_default_session(self) -> DefaultSession:
-        """Lazily create the DefaultSession (only when first needed)."""
-        if self._default_session is None:
-            self._default_session = DefaultSession(
+    def _get_fallback_session(self) -> ExecutionSession:
+        """Lazily create the fallback session (only when first needed)."""
+        if self._fallback_session is None:
+            self._fallback_session = self._fallback_executor.create_session(
                 self._setup_code,
                 timeout=self._timeout,
                 max_memory=self._max_memory,
             )
-        return self._default_session
+        return self._fallback_session
 
     def feed(self, code: str) -> ExecutionResult:
-        """Execute *code*, falling back to DefaultSession on Monty gaps."""
+        """Execute *code*, falling back to the configured session on Monty gaps."""
         # Session-level fallback — Monty never worked
         if self._monty_failed_permanently:
-            return self._get_default_session().feed(code)
+            return self._get_fallback_session().feed(code)
 
         assert self._monty_session is not None
         result = self._monty_session.feed(code)
 
         # Snippet-level fallback — ModuleNotFoundError means Monty
-        # doesn't have that stdlib module; retry with DefaultSession.
+        # doesn't have that stdlib module; retry with fallback session.
         if not result.success and result.error_type == "ModuleNotFoundError":
             _logfire.info(
-                "Monty ModuleNotFoundError, retrying snippet with DefaultSession: {error}",
+                "Monty ModuleNotFoundError, retrying snippet with {fallback}: {error}",
+                fallback=type(self._fallback_executor).__name__,
                 error=result.error,
             )
-            return self._get_default_session().feed(code)
+            return self._get_fallback_session().feed(code)
 
         return result
 
     def close(self) -> None:
         if self._monty_session is not None:
             self._monty_session.close()
-        if self._default_session is not None:
-            self._default_session.close()
+        if self._fallback_session is not None:
+            self._fallback_session.close()
 
     def __enter__(self) -> FallbackSession:
         return self
@@ -500,11 +502,12 @@ class MontyExecutor:
         If ``pydantic-monty`` is not installed.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, fallback_executor: Executor | None = None) -> None:
         if not MONTY_AVAILABLE:
             raise ImportError(
                 'MontyExecutor requires pydantic-monty. Install it with: pip install "vowel[monty]"'
             )
+        self._fallback_executor = fallback_executor or DefaultExecutor()
 
     async def execute(
         self,
@@ -675,6 +678,7 @@ class MontyExecutor:
             setup_code,
             timeout=timeout,
             max_memory=max_memory,
+            fallback_executor=self._fallback_executor,
         )
 
 
@@ -916,6 +920,142 @@ class DefaultExecutor:
             timeout=timeout,
             max_memory=max_memory,
         )
+
+
+class ResolvedExecutor:
+    """Executor wrapper that falls back when the primary executor raises."""
+
+    def __init__(self, primary: Executor, fallback: Executor) -> None:
+        self.primary = primary
+        self.fallback = fallback
+
+    async def execute(
+        self,
+        code: str,
+        *,
+        inputs: dict[str, Any] | None = None,
+        external_functions: dict[str, Callable[..., Any]] | None = None,
+        timeout: float = 5.0,
+        max_memory: int = 10 * 1024 * 1024,
+    ) -> ExecutionResult:
+        try:
+            return await self.primary.execute(
+                code,
+                inputs=inputs,
+                external_functions=external_functions,
+                timeout=timeout,
+                max_memory=max_memory,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _logfire.info(
+                "Primary executor {primary} raised {exc_type}; falling back to {fallback}",
+                primary=type(self.primary).__name__,
+                exc_type=type(exc).__name__,
+                fallback=type(self.fallback).__name__,
+            )
+            return await self.fallback.execute(
+                code,
+                inputs=inputs,
+                external_functions=external_functions,
+                timeout=timeout,
+                max_memory=max_memory,
+            )
+
+    def execute_sync(
+        self,
+        code: str,
+        *,
+        inputs: dict[str, Any] | None = None,
+        external_functions: dict[str, Callable[..., Any]] | None = None,
+        timeout: float = 5.0,
+        max_memory: int = 10 * 1024 * 1024,
+    ) -> ExecutionResult:
+        try:
+            return self.primary.execute_sync(
+                code,
+                inputs=inputs,
+                external_functions=external_functions,
+                timeout=timeout,
+                max_memory=max_memory,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _logfire.info(
+                "Primary executor {primary} raised {exc_type}; falling back to {fallback}",
+                primary=type(self.primary).__name__,
+                exc_type=type(exc).__name__,
+                fallback=type(self.fallback).__name__,
+            )
+            return self.fallback.execute_sync(
+                code,
+                inputs=inputs,
+                external_functions=external_functions,
+                timeout=timeout,
+                max_memory=max_memory,
+            )
+
+    def create_session(
+        self,
+        setup_code: str,
+        *,
+        timeout: float = 5.0,
+        max_memory: int = 10 * 1024 * 1024,
+    ) -> ExecutionSession:
+        try:
+            return self.primary.create_session(
+                setup_code,
+                timeout=timeout,
+                max_memory=max_memory,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _logfire.info(
+                "Primary executor {primary} session creation raised {exc_type}; "
+                "falling back to {fallback}",
+                primary=type(self.primary).__name__,
+                exc_type=type(exc).__name__,
+                fallback=type(self.fallback).__name__,
+            )
+            return self.fallback.create_session(
+                setup_code,
+                timeout=timeout,
+                max_memory=max_memory,
+            )
+
+
+def resolve_executors(
+    executor: Executor | None = None,
+    fallback_executor: Executor | None = None,
+) -> Executor:
+    """Resolve primary/fallback executors while preserving Monty-first defaults."""
+    fallback = fallback_executor or DefaultExecutor()
+
+    if isinstance(executor, ResolvedExecutor):
+        if fallback_executor is None:
+            return executor
+        return ResolvedExecutor(executor.primary, fallback)
+
+    if executor is None:
+        if MONTY_AVAILABLE:
+            return MontyExecutor(fallback_executor=fallback)
+        import warnings
+
+        warnings.warn(
+            "pydantic-monty not installed; using fallback executor "
+            f'{type(fallback).__name__} (no sandboxing). Install with: pip install "vowel[monty]"',
+            stacklevel=2,
+        )
+        return fallback
+
+    if isinstance(executor, DefaultExecutor) and fallback_executor is None:
+        return executor
+
+    if isinstance(executor, MontyExecutor):
+        executor._fallback_executor = fallback  # type: ignore[attr-defined]
+        return executor
+
+    if executor is fallback:
+        return executor
+
+    return ResolvedExecutor(executor, fallback)
 
 
 # ---------------------------------------------------------------------------
