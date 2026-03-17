@@ -1,13 +1,4 @@
-"""
-Context definitions for vowel eval specification generation.
-
-This module contains the EVAL_SPEC_CONTEXT which provides comprehensive
-documentation about vowel's YAML-based evaluation specification format.
-This context is used by EvalGenerator to guide LLM-based eval generation.
-
-Set VOWEL_CONTEXT_VERSION=legacy to use the pre-optimization prompt.
-Default is "v3" (GEPA-optimized with Sonnet proposer).
-"""
+"""Prompt context strings used for LLM-driven eval specification generation."""
 
 import os
 

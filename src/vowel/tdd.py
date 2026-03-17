@@ -1,24 +1,4 @@
-"""TDD-based eval generation: Intent -> Signature -> Evals -> Implementation.
-
-This module provides a true TDD approach where:
-1. LLM generates function signature from description (intent)
-2. LLM generates eval spec from signature (tests first)
-3. LLM generates implementation that passes the evals (code last)
-
-Example:
-    from vowel.tdd import TDDGenerator
-
-    generator = TDDGenerator(model="openai:gpt-4o")
-
-    result = generator.generate_all(
-        description="Binary search for target in sorted list. Returns index or -1.",
-        name="binary_search"
-    )
-
-    print(result.signature.to_signature_str())
-    print(result.yaml_spec)
-    print(result.func.code)
-"""
+"""TDD pipeline for generating signatures, evals, and implementations."""
 
 import inspect
 import os
@@ -39,12 +19,12 @@ from vowel.eval_types import EvalsSource
 from vowel.executor import Executor, resolve_executors
 from vowel.monitoring import enable_monitoring
 from vowel.runner import Function, RunEvals
-from vowel.spec_validation import (
+from vowel.utils import EvalSummary
+from vowel.validation import (
     build_failure_context,
+    validate_and_fix_spec,
     validate_expected_values,
 )
-from vowel.utils import EvalSummary
-from vowel.validation import validate_and_fix_spec
 
 # Configure logfire for tracing
 dotenv.load_dotenv()

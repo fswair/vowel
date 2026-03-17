@@ -4,8 +4,8 @@ import unittest
 from unittest.mock import MagicMock, PropertyMock, patch
 
 from vowel.eval_types import EvalsSource
-from vowel.spec_validation import build_failure_context
 from vowel.tdd import FunctionSignature, Param, TDDGenerator
+from vowel.validation import build_failure_context
 
 
 def _make_signature() -> FunctionSignature:

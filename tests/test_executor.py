@@ -1,20 +1,4 @@
-"""Tests for vowel.executor — CodeMode execution backends.
-
-Covers MontyExecutor, DefaultExecutor, and get_executor factory across
-all injection modes: external_functions, inputs, both, and pure code.
-
-Tests:
-     1. External functions only
-     2. Inputs only
-     3. Inputs + external functions combined
-     4. Pure code (no injection)
-     5. Stdout capture
-     6. Error handling
-     7. ExecutionResult structure
-     8. Protocol conformance
-     9. get_executor factory
-    10. Parity — both executors produce the same output
-"""
+"""Tests for executor backends, factory selection, and output parity."""
 
 from __future__ import annotations
 

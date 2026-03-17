@@ -1,14 +1,4 @@
-"""Tests for ExecutionSession API — DefaultSession and MontyReplSession.
-
-Covers:
-    - Basic feed() results (binary search)
-    - Error handling (ZeroDivisionError)
-    - Syntax error reporting
-    - State preservation across feed() calls
-    - Stdout capture through sessions
-    - Context-manager lifecycle
-    - Session isolation (fresh state per session)
-"""
+"""Tests for ExecutionSession behavior across default and Monty-backed sessions."""
 
 from __future__ import annotations
 

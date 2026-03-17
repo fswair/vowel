@@ -1,34 +1,4 @@
-"""LLM-powered evaluation specification generator and function healer.
-
-This module provides:
-- EvalGenerator: Generate eval specs and heal buggy functions using LLMs
-- generate_eval_spec: Generate YAML eval specs from function definitions
-- prepare_agent: Create a pydantic_ai Agent for eval generation
-
-Key Features:
-- Auto-generate YAML eval specs from function code and description
-- Heal buggy functions based on failing test inputs
-- Retry logic with configurable coverage thresholds
-- Support for async and sync function generation
-
-Example:
-    from vowel import EvalGenerator, Function
-
-    generator = EvalGenerator(model="openai:gpt-4o")
-
-    func = Function(
-        name="factorial",
-        description="Calculate factorial of n",
-        code="def factorial(n): return 1 if n <= 1 else n * factorial(n - 1)"
-    )
-
-    summary = generator.generate_and_run(
-        func,
-        auto_retry=True,
-        heal_function=True,
-        min_coverage=0.9
-    )
-"""
+"""LLM-backed eval generation and function healing utilities."""
 
 import os
 import time
@@ -43,6 +13,7 @@ from vowel.context import EVAL_SPEC_CONTEXT
 from vowel.eval_types import EvalsSource
 from vowel.monitoring import enable_monitoring
 from vowel.runner import Function, RunEvals
+from vowel.schema import materialize_yaml_with_schema_header
 from vowel.utils import EvalSummary, check_compatibility, import_function
 from vowel.validation import validate_and_fix_spec
 
@@ -563,8 +534,9 @@ In assertions, use `input` (NOT `inputs`) to access the input value(s).
             )
 
             if save_to_file:
+                spec_to_write = materialize_yaml_with_schema_header(spec_to_use)
                 with open(f"{func.name}_evals.yml", "w") as f:
-                    f.write(spec_to_use)
+                    f.write(spec_to_write)
 
             runner = RunEvals.from_source(spec_to_use)
             if func.func:

@@ -1,23 +1,4 @@
-"""Utility functions for the vowel evaluation framework.
-
-This module provides core utilities for:
-- Loading and parsing YAML evaluation specifications
-- Type compatibility checking for YAML serialization
-- Function import and execution helpers
-- Dataset creation and evaluation running
-- Result aggregation and reporting
-
-Key classes:
-    EvalResult: Result of a single function evaluation
-    EvalSummary: Aggregated results from multiple evaluations
-
-Key functions:
-    run_evals: Main entry point for running evaluations
-    load_evals: Load evaluations from various sources
-    to_dataset: Convert Evals to pydantic-evals Dataset
-    is_yaml_serializable_type: Check if a type can be serialized to YAML
-    check_compatibility: Validate function parameters for YAML compatibility
-"""
+"""Shared utilities for loading specs, building datasets, and running evals."""
 
 import asyncio
 import builtins
@@ -68,8 +49,39 @@ class EvalsBundle(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    evals: dict[str, Evals] = Field(default_factory=dict)
+    evals: dict[str, Evals] = Field(min_length=1)
     fixtures: dict[str, FixtureDefinition] = Field(default_factory=dict)
+
+    def to_yaml(self) -> str:
+        """Serialize bundle to current vowel YAML spec format."""
+        data: dict[str, Any] = {}
+
+        for func_id, evals in self.evals.items():
+            evals_dict = evals.model_dump(
+                mode="python",
+                exclude_none=True,
+                exclude_defaults=True,
+            )
+            # Function id is represented by the top-level YAML key.
+            evals_dict.pop("id", None)
+            data[func_id] = evals_dict
+
+        if self.fixtures:
+            data["fixtures"] = {
+                name: definition.model_dump(
+                    mode="python",
+                    exclude_none=True,
+                    exclude_defaults=True,
+                )
+                for name, definition in self.fixtures.items()
+            }
+
+        return yaml.safe_dump(
+            data,
+            sort_keys=False,
+            allow_unicode=True,
+            default_flow_style=False,
+        )
 
 
 # =============================================================================
@@ -907,50 +919,6 @@ def import_class(class_path: str) -> type:
         raise ImportError(f"'{class_name}' is not a class")
 
     return cls
-
-
-def load_evals_file(yaml_path: str) -> dict[str, Evals]:
-    with open(yaml_path) as f:
-        loaded = yaml.safe_load(f)
-
-    evals_file = EvalsFile.model_validate(loaded)
-    return evals_file.get_evals()
-
-
-def load_evals_from_yaml_string(yaml_content: str) -> dict[str, Evals]:
-    loaded = yaml.safe_load(yaml_content)
-    evals_file = EvalsFile.model_validate(loaded)
-    return evals_file.get_evals()
-
-
-def load_evals_from_dict(data: dict) -> dict[str, Evals]:
-    evals_file = EvalsFile.model_validate(data)
-    return evals_file.get_evals()
-
-
-def load_evals_from_object(evals_obj: EvalsFile) -> dict[str, Evals]:
-    return evals_obj.get_evals()
-
-
-def load_evals(source: str | Path | dict | EvalsFile) -> dict[str, Evals]:
-    if isinstance(source, EvalsFile):
-        return load_evals_from_object(source)
-    elif isinstance(source, dict):
-        return load_evals_from_dict(source)
-    elif isinstance(source, (str, Path)):
-        source_str = str(source)
-        # Check if it's an existing file path first, before YAML heuristics
-        if os.path.exists(source_str):
-            return load_evals_file(source_str)
-        if _is_yaml_source_string(source_str):
-            return load_evals_from_yaml_string(source_str)
-        else:
-            return load_evals_file(source_str)
-    else:
-        raise TypeError(
-            f"source must be a file path (str/Path), YAML string (str), dict, "
-            f"or EvalsFile object, got {type(source)}"
-        )
 
 
 # =============================================================================
@@ -2018,10 +1986,7 @@ def run_evals(
     """
     # Load both evals and fixtures from YAML
     _ = (executor, fallback_executor)
-    if isinstance(source, EvalsBundle):
-        bundle = source
-    else:
-        bundle = load_bundle(source)
+    bundle = source if isinstance(source, EvalsBundle) else load_bundle(source)
     all_evals = bundle.evals
     yaml_fixtures = bundle.fixtures
 

@@ -1,24 +1,4 @@
-"""Pydantic models for vowel evaluation specifications.
-
-This module defines the data models used to parse and validate
-YAML evaluation specifications. These models ensure type safety
-and provide clear schemas for evaluation definitions.
-
-Main evaluation types:
-    IsInstanceCase: Type checking validation
-    AssertionCase: Custom Python assertion evaluation
-    DurationCase: Performance/timing validation
-    ContainsInputCase: Input containment check
-    PatternMatchCase: Regex pattern matching
-    RaisesCase: Exception validation
-    LLMJudgeCase: LLM-based semantic evaluation
-
-Container models:
-    MatchCase: Individual test case with input/expected output
-    DatasetCase: Wrapper for test cases in dataset
-    Evals: Complete evaluation specification for a function
-    EvalsFile: Root model for YAML file parsing
-"""
+"""Pydantic models for parsing and validating vowel YAML specifications."""
 
 import os
 import typing
@@ -181,13 +161,31 @@ class EvalsSource(BaseModel):
 # Fixture Models
 # =============================================================================
 
-FixtureScope = Literal["function", "module", "session"]
-"""Scope for fixture lifecycle.
+FixtureScope = Literal["case", "eval", "file", "function", "module", "session"]
+"""Supported fixture scope names.
 
-- function: Setup/teardown for each test case (default)
-- module: Setup once per eval file, teardown after all cases
-- session: Setup once per run_evals call, teardown at end
+Canonical user-facing names:
+- case: per dataset case
+- eval: per function eval block
+- file: per YAML file / run invocation
+
+Compatibility aliases:
+- function -> case
+- module -> eval
+- session -> file
+
+Note:
+Runtime lifecycle currently uses legacy internal values
+(`function`/`module`/`session`). New names are normalized to these
+internal values for behavior-preserving migration.
 """
+
+
+_FIXTURE_SCOPE_ALIASES: dict[str, str] = {
+    "case": "function",
+    "eval": "module",
+    "file": "session",
+}
 
 
 class FixtureDefinition(BaseModel):
@@ -218,8 +216,21 @@ class FixtureDefinition(BaseModel):
     )
     scope: FixtureScope = Field(
         default="function",
-        description="Lifecycle scope: 'function' (per case), 'module' (per eval), or 'session' (per run)",
+        description=(
+            "Fixture lifecycle scope. Preferred names: 'case', 'eval', 'file'. "
+            "Compatibility aliases are accepted: 'function', 'module', 'session'. "
+            "Current runtime normalization maps case->function, eval->module, file->session."
+        ),
     )
+
+    @field_validator("scope", mode="before")
+    @classmethod
+    def normalize_scope_aliases(cls, value: Any) -> Any:
+        """Normalize new scope names to legacy internal values."""
+        if value is None or not isinstance(value, str):
+            return value
+        normalized = value.strip().lower()
+        return _FIXTURE_SCOPE_ALIASES.get(normalized, normalized)
 
     @model_validator(mode="after")
     def validate_setup_or_cls(self):

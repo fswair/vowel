@@ -4,6 +4,7 @@
   "exclude": [
     "vowel-optimization",
     "tmp",
+    "benchmark*",
     "**/.*"
   ],
   "reportMissingModuleSource": "none",

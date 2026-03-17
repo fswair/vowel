@@ -1,8 +1,4 @@
-"""LLM-based integration tests with cassette caching.
-
-These tests use real LLM calls but cache responses for reproducibility.
-Run with --update-cassettes to refresh cached responses.
-"""
+"""LLM integration tests with cassette-backed response caching."""
 
 import hashlib
 import json

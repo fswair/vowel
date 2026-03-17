@@ -1,33 +1,7 @@
-"""
-vowel - A modular evaluation framework for testing functions with YAML-based specifications.
-
-This package provides a comprehensive evaluation framework for testing Python functions
-using YAML-based specifications. It supports various evaluation types including:
-
-- Type checking (isinstance validation)
-- Custom assertions (Python expressions)
-- Performance constraints (duration limits)
-- Input containment checks
-- Regex pattern matching
-- Exception validation
-- LLM-based semantic evaluation
-
-Quick Start:
-    # Run evaluations from a YAML file
-    from vowel import run_evals
-    summary = run_evals("evals.yml")
-
-    # Generate evals for a function using LLM
-    from vowel import EvalGenerator, Function
-    gen = EvalGenerator(model="openai:gpt-4o")
-    func = Function(name="add", code="def add(a, b): return a + b", description="Add two numbers")
-    summary = gen.generate_and_run(func, auto_retry=True)
-
-For more information, see the documentation at:
-https://github.com/fswair/vowel
-"""
+"""Public package exports for the vowel evaluation framework."""
 
 import importlib.metadata
+from contextlib import suppress
 
 __version__ = importlib.metadata.version("vowel")
 
@@ -48,27 +22,28 @@ from .executor import (
     resolve_executors,
 )
 from .runner import Function, RunEvals
+from .schema import ensure_cached_schema
 from .utils import (
     EvalResult,
     EvalSummary,
     check_compatibility,
     get_unsupported_params,
     is_yaml_serializable_type,
-    load_evals,
-    load_evals_file,
-    load_evals_from_dict,
-    load_evals_from_object,
-    load_evals_from_yaml_string,
+    load_bundle,
+    load_bundle_file,
+    load_bundle_from_dict,
+    load_bundle_from_object,
+    load_bundle_from_yaml_string,
     run_evals,
     to_dataset,
 )
 
 __all__ = [
-    "load_evals_file",
-    "load_evals_from_yaml_string",
-    "load_evals_from_dict",
-    "load_evals_from_object",
-    "load_evals",
+    "load_bundle_file",
+    "load_bundle_from_yaml_string",
+    "load_bundle_from_dict",
+    "load_bundle_from_object",
+    "load_bundle",
     "to_dataset",
     "run_evals",
     "RunEvals",
@@ -101,3 +76,7 @@ __all__ = [
     "ExplorationPlan",
     "SnippetResult",
 ]
+
+
+with suppress(Exception):
+    ensure_cached_schema(__version__)

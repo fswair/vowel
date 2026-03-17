@@ -1,18 +1,13 @@
-"""Command-line interface for the vowel evaluation framework.
+"""Command-line entry points for running and managing vowel eval specs."""
 
-Usage:
-    vowel <yaml_file>                 Run evaluations from a YAML spec
-    vowel -d <directory>              Run all YAML files in a directory
-    vowel <yaml_file> -v              Detailed summary with spec semantics
-    vowel <yaml_file> --hide-report   Hide pydantic_evals report output
-"""
-
+import json
 import sys
 import time
 from pathlib import Path
 
 import click
 import dotenv
+import yaml
 from rich import box
 from rich.console import Console
 from rich.panel import Panel
@@ -27,6 +22,7 @@ from .eval_types import (
     LLMJudgeCase,
     PatternMatchCase,
 )
+from .schema import build_yaml_schema_from_bundle, materialize_yaml_with_schema_header
 from .utils import EvalsBundle, EvalSummary, load_bundle, run_evals
 
 dotenv.load_dotenv()
@@ -249,7 +245,9 @@ def validate_coverage(ctx, param, value):
 
 
 @click.command()
-@click.argument("yaml_file", type=click.Path(exists=True, path_type=Path), required=False)
+@click.argument("arg1", type=click.Path(path_type=Path), required=False)
+@click.argument("arg2", type=click.Path(path_type=Path), required=False)
+@click.argument("arg3", type=click.Path(path_type=Path), required=False)
 @click.option("--ci", is_flag=True, help="Enable CI mode")
 @click.option(
     "--coverage",
@@ -278,8 +276,16 @@ def validate_coverage(ctx, param, value):
 @click.option("--watch", "-w", is_flag=True, help="Watch mode: re-run on file changes")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed evaluation summary")
 @click.option("--hide-report", is_flag=True, help="Hide pydantic_evals report output")
+@click.option(
+    "--create",
+    "schema_create",
+    is_flag=True,
+    help="With 'vowel schema': generate vowel-schema.json in current directory",
+)
 def main(
-    yaml_file: Path | None,
+    arg1: Path | None,
+    arg2: Path | None,
+    arg3: Path | None,
     debug: bool,
     coverage: float,
     filter_func: str | None,
@@ -295,9 +301,74 @@ def main(
     watch: bool,
     verbose: bool,
     hide_report: bool,
+    schema_create: bool,
 ):
     """vowel — YAML-based evaluation framework for Python functions."""
     console = Console(force_terminal=False, no_color=True) if no_color else Console()
+
+    # Command mode: vowel schema <file_path>
+    if arg1 is not None and str(arg1) == "schema":
+        # Command mode: vowel schema --create [output_path]
+        if schema_create:
+            output_path = arg2 if arg2 is not None else Path.cwd() / "vowel-schema.json"
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            schema = build_yaml_schema_from_bundle()
+            output_path.write_text(
+                json.dumps(schema, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+            )
+            console.print(f"[green]✓[/green] Generated schema: [cyan]{output_path}[/cyan]")
+            return
+
+        if arg2 is None:
+            click.secho("ERROR: vowel schema requires <file_path> or --create", fg="red", err=True)
+            raise click.Abort()
+
+        target_path = arg2
+        if not target_path.exists():
+            click.secho(f"ERROR: File not found: {target_path}", fg="red", err=True)
+            raise SystemExit(1)
+
+        if target_path.suffix.lower() == ".json":
+            click.secho(
+                "ERROR: JSON files are not supported by 'vowel schema <file_path>'. "
+                "Use a YAML file (.yml/.yaml).",
+                fg="red",
+                err=True,
+            )
+            raise SystemExit(1)
+
+        existing = target_path.read_text(encoding="utf-8")
+
+        # Do not inject schema header into invalid YAML files.
+        try:
+            yaml.safe_load(existing)
+        except Exception as e:
+            click.secho(
+                f"ERROR: File is not valid YAML, schema header not added: {e}",
+                fg="red",
+                err=True,
+            )
+            raise SystemExit(1) from None
+
+        # Do not inject schema header if content is not a valid vowel spec.
+        try:
+            load_bundle(existing)
+        except Exception as e:
+            click.secho(
+                f"ERROR: Pydantic validation failed, schema header not added: {e}",
+                fg="red",
+                err=True,
+            )
+            raise SystemExit(1) from None
+
+        updated = materialize_yaml_with_schema_header(existing)
+        target_path.write_text(updated, encoding="utf-8")
+        console.print(f"[green]✓[/green] Updated schema header: [cyan]{target_path}[/cyan]")
+
+        console.print("[green]✓[/green] Pydantic validation passed")
+        return
+
+    yaml_file = arg1
 
     # Validate incompatible options
     if directory and filter_func:
@@ -486,6 +557,9 @@ def main(
         if not yaml_file:
             click.secho("ERROR: --watch requires a YAML file", fg="red", err=True)
             raise click.Abort()
+        if not yaml_file.exists():
+            click.secho(f"ERROR: YAML file not found: {yaml_file}", fg="red", err=True)
+            raise click.Abort()
 
         try:
             from watchdog.events import FileSystemEventHandler
@@ -565,6 +639,9 @@ def main(
         if not quiet:
             console.print(f"Found [cyan]{len(yaml_files)}[/cyan] YAML file(s)")
     elif yaml_file:
+        if not yaml_file.exists():
+            click.secho(f"ERROR: YAML file not found: {yaml_file}", fg="red", err=True)
+            raise click.Abort()
         yaml_files = [yaml_file]
     else:
         click.secho("ERROR: Either YAML_FILE or --dir is required", fg="red", err=True)
@@ -738,8 +815,6 @@ def main(
 
     # Export JSON
     if export_json:
-        import json
-
         json_data = summary.to_json()
         with open(export_json, "w") as f:
             json.dump(json_data, f, indent=2)

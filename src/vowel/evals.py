@@ -1,20 +1,4 @@
-"""Evaluator implementations for the vowel framework.
-
-This module contains the concrete evaluator classes that implement
-the evaluation logic defined in eval_types.py. Each evaluator
-integrates with pydantic-evals to provide result reporting.
-
-Evaluators:
-    AssertionEvaluator: Runs Python assertion expressions
-    TypeAdapterEvaluator: Validates output types using Pydantic
-    ContainsInputEvaluator: Checks if output contains input value
-    PatternMatchingEvaluator: Validates output against regex patterns
-    RaisesEvaluator: Validates expected exception raising
-
-Factory functions:
-    create_llm_judge: Creates an LLM-based judge evaluator
-    prepare_env_and_condition: Prepares evaluation context
-"""
+"""Concrete evaluator implementations used by the vowel runtime."""
 
 import importlib.util
 import os

@@ -1,28 +1,4 @@
-"""RunEvals - A fluent API for running evaluations.
-
-This module provides:
-- Function: Pydantic model representing a function with code and metadata
-- RunEvals: Fluent API for loading and running evaluations
-
-Example:
-    # Run from YAML file
-    from vowel import RunEvals
-
-    summary = RunEvals.from_file("evals.yml").run()
-    print(f"All passed: {summary.all_passed}")
-
-    # Run with custom functions
-    def my_func(x):
-        return x * 2
-
-    summary = (
-        RunEvals.from_file("evals.yml")
-        .with_functions({"my_func": my_func})
-        .filter(["my_func"])
-        .debug()
-        .run()
-    )
-"""
+"""Fluent APIs and models for loading and running evals."""
 
 import ast
 import codecs
@@ -37,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from .eval_types import Evals, EvalsFile, FixtureDefinition
 from .executor import Executor
-from .utils import EvalSummary, EvalsBundle
+from .utils import EvalsBundle, EvalSummary
 from .utils import run_evals as _run_evals
 
 _T = TypeVar("_T", bound=Any)
@@ -76,12 +52,7 @@ class Function(BaseModel, Generic[_RT]):
 
     @property
     def impl(self) -> Callable[..., _RT]:
-        """
-        Get the function implementation as a callable.
-
-        Returns:
-            Callable: The function implementation.
-        """
+        """Return the executable function object for this definition."""
         if not self.func:
             self.execute()
         return cast(Callable, self.func)

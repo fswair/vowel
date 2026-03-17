@@ -1,23 +1,16 @@
-"""Static validator for LLM-generated eval specifications.
+"""Validation and normalization helpers for generated eval specs."""
 
-Catches common LLM generation mistakes BEFORE the spec is used:
-1. Extra fields in cases (comment, note, description, etc.)
-2. YAML-unparseable type remnants (set literals, tuple strings, float('inf'), etc.)
-3. Invented exception types not in function code
-4. Removes or fixes problematic cases, returns clean YAML
-
-Usage:
-    from vowel.validation import validate_and_fix_spec
-
-    fixed_yaml, warnings = validate_and_fix_spec(yaml_spec, function_code="def foo(x): ...")
-"""
-
+import ast
 import re
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 import logfire
 import yaml
+
+from vowel.executor import Executor, resolve_executors
+from vowel.runner import Function
+from vowel.utils import EvalSummary
 
 # Fields allowed in a case block (from MatchCase model)
 ALLOWED_CASE_FIELDS = frozenset(
@@ -399,3 +392,261 @@ def validate_and_fix_spec(
         )
 
     return result
+
+
+def build_failure_context(summary: EvalSummary) -> str:
+    """Build a concise failure report to inject into a retry prompt."""
+    lines: list[str] = []
+    for result in summary.results:
+        if result.report:
+            for case in result.report.cases:
+                failed_assertions = {k: v for k, v in case.assertions.items() if not v.value}
+                if failed_assertions:
+                    parts = []
+                    for k, v in failed_assertions.items():
+                        if v.reason:
+                            parts.append(f"{k}: {v.reason}")
+                        else:
+                            parts.append(f"{k}: FAILED")
+                    lines.append(f"- Case '{case.name}' FAILED [{', '.join(parts)}]")
+        if result.error:
+            lines.append(f"- Error: {result.error}")
+    return "\n".join(lines) if lines else "Unknown failures"
+
+
+def build_call_code(
+    func_name: str, case: dict
+) -> (
+    str | None
+):  # TODO: intead of building call code, consider passing arguments through executor inputs
+    """Build a ``func(args...)`` call string from a YAML case dict."""
+    if "inputs" in case and case["inputs"] is not None:
+        args = case["inputs"]
+        if isinstance(args, list):
+            arg_strs = ", ".join(repr(a) for a in args)
+            return f"{func_name}({arg_strs})"
+        if isinstance(args, dict):
+            kwarg_strs = ", ".join(f"{k}={v!r}" for k, v in args.items())
+            return f"{func_name}({kwarg_strs})"
+    elif "input" in case and case["input"] is not None:
+        return f"{func_name}({case['input']!r})"
+    return None
+
+
+def inject_durations(
+    yaml_spec: str,
+    func: Function,
+    executor: Executor,
+    *,
+    fallback_executor: Executor | None = None,
+    buffer_pct: float = 0.5,
+    floor_ms: float = 10.0,
+) -> str:
+    """Add per-case ``duration`` fields based on actual execution times."""
+    spec = yaml.safe_load(yaml_spec)
+    if not isinstance(spec, dict):
+        return yaml_spec
+
+    executor = resolve_executors(executor, fallback_executor)
+
+    try:
+        session = executor.create_session(func.code)
+    except Exception:
+        logfire.warn("Could not create session for duration injection")
+        return yaml_spec
+
+    with session:
+        for eval_id, eval_def in spec.items():
+            if not isinstance(eval_def, dict):
+                continue
+            for case_entry in eval_def.get("dataset", []):
+                case = case_entry.get("case", {})
+                if not isinstance(case, dict):
+                    continue
+                if case.get("raises"):
+                    continue
+
+                call_code = build_call_code(eval_id, case)
+                if call_code is None:
+                    continue
+
+                result = session.feed(call_code)
+                if result.success:
+                    dur = max(
+                        result.duration_ms * (1 + buffer_pct),
+                        floor_ms,
+                    )
+                    case["duration"] = round(dur, 1)
+
+    return yaml.safe_dump(spec, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+
+def validate_expected_values(
+    yaml_spec: str,
+    func: Function,
+    executor: Executor | None = None,
+    fallback_executor: Executor | None = None,
+) -> str:
+    """Validate and fix expected values in a YAML spec by executing cases."""
+    executor = resolve_executors(executor, fallback_executor)
+
+    spec = yaml.safe_load(yaml_spec)
+    if not isinstance(spec, dict):
+        return yaml_spec
+
+    try:
+        session = executor.create_session(func.code)
+    except Exception:
+        logfire.warn("Could not create session for expected value validation")
+        return yaml_spec
+
+    fixes_applied = 0
+
+    with session:
+        for eval_id, eval_def in spec.items():
+            if not isinstance(eval_def, dict):
+                continue
+            for case_entry in eval_def.get("dataset", []):
+                case = case_entry.get("case", {})
+                if not isinstance(case, dict):
+                    continue
+
+                call_code = build_call_code(eval_id, case)
+                if call_code is None:
+                    continue
+
+                result = session.feed(call_code)
+
+                if (
+                    "expected" in case
+                    and not case.get("raises")
+                    and result.success
+                    and result.output != case["expected"]
+                ):
+                    logfire.info(
+                        "Fixing expected value for case: {expected} → {actual}",
+                        expected=repr(case["expected"]),
+                        actual=repr(result.output),
+                    )
+                    case["expected"] = result.output
+                    fixes_applied += 1
+
+                if case.get("raises"):
+                    expected_exc = case["raises"]
+                    if result.success:
+                        logfire.info(
+                            "Case expected {exc} but function returned {output}, fixing",
+                            exc=expected_exc,
+                            output=repr(result.output),
+                        )
+                        del case["raises"]
+                        if "match" in case:
+                            del case["match"]
+                        case["expected"] = result.output
+                        fixes_applied += 1
+                    elif result.error_type and result.error_type != expected_exc:
+                        logfire.info(
+                            "Case expected {expected} but got {actual}, fixing",
+                            expected=expected_exc,
+                            actual=result.error_type,
+                        )
+                        case["raises"] = result.error_type
+                        fixes_applied += 1
+
+    if fixes_applied > 0:
+        logfire.info("Validated spec: {count} fixes applied", count=fixes_applied)
+        return yaml.safe_dump(spec, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+    return yaml_spec
+
+
+def inject_missing_error_cases(
+    yaml_spec: str,
+    func_name: str,
+    error_snippets: list[dict],
+) -> str:
+    """Inject error cases from exploration into the spec if the LLM missed them."""
+    if not error_snippets:
+        return yaml_spec
+
+    spec = yaml.safe_load(yaml_spec)
+    if not isinstance(spec, dict) or func_name not in spec:
+        return yaml_spec
+
+    eval_def = spec[func_name]
+    dataset = eval_def.setdefault("dataset", [])
+
+    existing_raises_inputs: set[str] = set()
+    for entry in dataset:
+        case = entry.get("case", {})
+        if isinstance(case, dict) and case.get("raises"):
+            inp = case.get("input")
+            inps = case.get("inputs")
+            existing_raises_inputs.add(repr((inp, inps)))
+
+    injected = 0
+
+    for snippet in error_snippets:
+        code = snippet["code"].strip()
+        error_type = snippet["error_type"]
+        description = snippet.get("description", "")
+
+        try:
+            tree = ast.parse(code, mode="eval")
+        except SyntaxError:
+            continue
+
+        if not isinstance(tree.body, ast.Call):
+            continue
+
+        try:
+            args = [ast.literal_eval(a) for a in tree.body.args]
+            kwargs = {kw.arg: ast.literal_eval(kw.value) for kw in tree.body.keywords}
+        except (ValueError, TypeError):
+            continue
+
+        if kwargs:
+            input_repr = repr((None, kwargs))
+            if input_repr in existing_raises_inputs:
+                continue
+            case_dict: dict[str, Any] = {
+                "id": f"error_{error_type.lower()}_{injected}",
+                "inputs": kwargs,
+                "raises": error_type,
+            }
+        elif len(args) == 1:
+            if isinstance(args[0], tuple):
+                continue
+            input_repr = repr((args[0], None))
+            if input_repr in existing_raises_inputs:
+                continue
+            case_dict = {
+                "id": f"error_{error_type.lower()}_{injected}",
+                "input": args[0],
+                "raises": error_type,
+            }
+        elif len(args) > 1:
+            input_repr = repr((None, args))
+            if input_repr in existing_raises_inputs:
+                continue
+            case_dict = {
+                "id": f"error_{error_type.lower()}_{injected}",
+                "inputs": args,
+                "raises": error_type,
+            }
+        else:
+            continue
+
+        dataset.append({"case": case_dict})
+        injected += 1
+        logfire.info(
+            "Injected error case: {desc} → raises {exc}",
+            desc=description,
+            exc=error_type,
+        )
+
+    if injected > 0:
+        logfire.info("Injected {count} missing error cases into spec", count=injected)
+        return yaml.safe_dump(spec, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+    return yaml_spec

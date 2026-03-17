@@ -1,71 +1,4 @@
-"""Code execution backends for CodeMode eval generation.
-
-CodeMode allows the eval generation agent to *run* code inside a sandbox
-rather than guessing expected values.  This produces ground-truth outputs
-and lets the agent empirically explore function behaviour (edge cases,
-exception boundaries, return types) before writing test cases.
-
-Architecture
-------------
-``Executor`` is a runtime Protocol — any object that implements ``execute()``
-qualifies.  Two concrete implementations are provided:
-
-* ``MontyExecutor``   — uses ``pydantic-monty`` (Rust-based sandbox, <0.1 ms
-                        startup, no filesystem/network access).  **Recommended
-                        for production and the optimization loop.**
-* ``DefaultExecutor`` — uses Python's built-in ``exec()`` with stdout capture.
-                        No sandboxing.  Safe only for trusted, local code;
-                        useful during development when Monty is not installed.
-
-The ``execute()`` method accepts two orthogonal injection mechanisms that
-mirror Monty's native API:
-
-* ``inputs``             — ``dict[str, Any]`` of *values* injected as
-                           top-level variables visible to the snippet.
-* ``external_functions`` — ``dict[str, Callable]`` of *host-side callbacks*
-                           the snippet can call by name.  In the Monty
-                           backend each call exits the sandbox, runs on
-                           the host, and returns the result.
-
-Session API
------------
-For batch exploration (e.g. CodeMode), use ``create_session()`` to compile
-the function source **once**, then ``feed()`` each snippet against the
-preserved runtime state.
-
-* ``MontyReplSession``   — backed by ``MontyRepl``: zero re-parse overhead
-                           per snippet, heap/globals preserved across feeds.
-* ``DefaultSession``     — backed by a persistent ``exec()`` namespace.
-
-Usage examples
---------------
-**External functions** — inject one or more real functions::
-
-    await executor.execute(
-        '''
-        results = []
-        results.append(target_func([1, 3, 5, 7, 9], 5))
-        results.append(target_func([], 1))
-        results
-        ''',
-        external_functions={"target_func": binary_search},
-    )
-
-**Inputs** — inject plain values::
-
-    await executor.execute(
-        "x + y",
-        inputs={"x": 10, "y": 20},
-    )
-
-**Session** — compile once, feed many snippets::
-
-    async with executor.create_session(func_code) as session:
-        r1 = session.feed("binary_search([1,3,5], 3)")
-        r2 = session.feed("binary_search([], 1)")
-
-The value of the last expression becomes ``ExecutionResult.output``.
-"""
+"""Execution backends used by CodeMode for sandboxed and local code runs."""
 
 from __future__ import annotations
 
@@ -90,12 +23,7 @@ MONTY_AVAILABLE = importlib.util.find_spec("pydantic_monty") is not None
 
 
 def run_sync(coro: Any) -> Any:
-    """Run a coroutine synchronously, even inside a running event loop.
-
-    Tries ``asyncio.run()`` first (clean, no patching).  If there is
-    already a running loop (e.g. Jupyter, async framework), falls back
-    to ``nest_asyncio`` + ``loop.run_until_complete()``.
-    """
+    """Run a coroutine from sync code, including running-loop environments."""
     try:
         return asyncio.run(coro)
     except RuntimeError as exc:

@@ -1,21 +1,11 @@
-"""CodeMode eval generation pipeline.
+"""CodeMode pipeline for execution-aware eval spec generation.
 
-This module provides ``CodeModeGenerator`` — a two-phase pipeline that uses
-a sandboxed code executor to produce ground-truth expected values before
-generating YAML eval specs.
+CodeMode uses real execution feedback to generate robust vowel eval specs:
+1. Explore behavior by running LLM-generated snippets against the target code.
+2. Generate and refine a spec from verified outputs/errors.
 
-Phase 1 — **Exploration**
-    The LLM writes small Python snippets that call ``target_func`` with various
-    inputs.  Each snippet is executed via ``Executor`` (Monty sandbox by default)
-    and the real outputs are collected.  This replaces guesswork with empirical
-    observation.
-
-Phase 2 — **Spec Generation**
-    The exploration results (inputs → outputs, edge cases, exceptions) are fed
-    back to the LLM together with the eval spec context.  The LLM produces the
-    final YAML spec with verified expected values.
-
-All steps are instrumented with ``logfire`` for full observability.
+The pipeline supports both YAML output and structured bundle output, and keeps
+traceability via logfire spans.
 """
 
 from __future__ import annotations
@@ -34,15 +24,16 @@ from vowel.eval_types import EvalsSource
 from vowel.executor import ExecutionResult, Executor, resolve_executors
 from vowel.monitoring import enable_monitoring
 from vowel.runner import Function, RunEvals
-from vowel.spec_validation import (
+from vowel.schema import materialize_yaml_with_schema_header
+from vowel.utils import EvalsBundle, EvalSummary
+from vowel.validation import (
     build_call_code,
     build_failure_context,
     inject_durations,
     inject_missing_error_cases,
+    validate_and_fix_spec,
     validate_expected_values,
 )
-from vowel.utils import EvalSummary
-from vowel.validation import validate_and_fix_spec
 
 enable_monitoring(service_name="vowel-codemode")
 
@@ -177,17 +168,10 @@ class CodeModeResult(BaseModel):
 
 
 class CodeModeGenerator:
-    """Two-phase eval generator: explore with executor, then generate spec.
+    """Execution-guided eval generator.
 
-    Parameters
-    ----------
-    model:
-        LLM model identifier (e.g. ``"openai:gpt-4o"``).
-    executor:
-        Code execution backend.  Defaults to ``get_executor("auto")``
-        which prefers MontyExecutor when available.
-    additional_context:
-        Extra instructions appended to the system prompt.
+    The generator first discovers behavior by running snippets, then produces
+    a validated eval spec (YAML or bundle) from those verified results.
     """
 
     def __init__(
@@ -198,6 +182,7 @@ class CodeModeGenerator:
         fallback_executor: Executor | None = None,
         additional_context: str = "",
         min_snippets: int = 15,
+        use_model_spec: bool = False,
         **opts,
     ) -> None:
         # Default fallback from kwargs (for backwards compatibility) or environment
@@ -217,11 +202,12 @@ class CodeModeGenerator:
         self.executor = resolve_executors(default_executor, fallback_executor)
         self.additional_context = additional_context
         self.min_snippets = min_snippets
+        self.use_model_spec = use_model_spec
         self._opts = opts
 
         # Lazy agents
         self._explorer_agent: Agent[None, ExplorationPlan] | None = None
-        self._spec_agent: Agent[None, EvalsSource] | None = None
+        self._spec_agent: Agent[None, EvalsSource | EvalsBundle] | None = None
 
         logfire.info(
             "CodeModeGenerator initialized",
@@ -244,11 +230,12 @@ class CodeModeGenerator:
         return self._explorer_agent
 
     @property
-    def spec_agent(self) -> Agent[None, EvalsSource]:
+    def spec_agent(self) -> Agent[None, EvalsSource | EvalsBundle]:
         if self._spec_agent is None:
+            output_type = EvalsBundle if self.use_model_spec else EvalsSource
             self._spec_agent = Agent(
                 self.spec_model,
-                output_type=EvalsSource,
+                output_type=output_type,
                 system_prompt=self._spec_system_prompt(),
                 **self._opts,
             )
@@ -323,21 +310,10 @@ The execution results are ground-truth from running the real function."""
         *,
         exploration_rounds: int = 2,
     ) -> list[SnippetResult]:
-        """Phase 1: Generate and execute exploration snippets.
+        """Generate and execute exploration snippets.
 
-        Supports multi-round feedback-guided exploration.  Round 1 uses
-        static reasoning (speculation-based).  Round 2+ receives a
-        programmatic cluster summary of prior results so the LLM can
-        target unexplored behaviour classes (evidence-based).
-
-        Parameters
-        ----------
-        exploration_rounds:
-            Number of exploration rounds (default 2).  Set to 1 to
-            restore single-shot behaviour.
-
-        Returns a list of ``SnippetResult`` with real outputs from the
-        executor.
+        Round 1 discovers baseline behavior. Subsequent rounds receive prior
+        execution evidence and target uncovered behavior classes.
         """
         with logfire.span(
             "codemode.explore",
@@ -404,7 +380,7 @@ The execution results are ground-truth from running the real function."""
         plan: ExplorationPlan,
         round_num: int = 1,
     ) -> list[SnippetResult]:
-        """Execute all snippets in a plan and return results."""
+        """Execute all snippets in an exploration plan and collect results."""
         all_snippets = [
             *((s, "normal") for s in plan.snippets),
             *((s, "error") for s in plan.error_snippets),
@@ -448,11 +424,7 @@ The execution results are ground-truth from running the real function."""
 
     @staticmethod
     def _build_cluster_summary(results: list[SnippetResult]) -> str:
-        """Build a deterministic cluster summary from exploration results.
-
-        Groups results by output type / error type and formats a concise
-        summary for the Round 2 exploration prompt.
-        """
+        """Summarize observed output/error clusters for targeted exploration."""
         # -- Success clusters --
         success_types: dict[str, int] = {}
         for r in results:
@@ -501,7 +473,7 @@ The execution results are ground-truth from running the real function."""
         prior: list[SnippetResult],
         new: list[SnippetResult],
     ) -> int:
-        """Count how many new behaviour classes the new results introduced."""
+        """Count new behavior signatures introduced by a round."""
 
         def _behavior_key(r: SnippetResult) -> str:
             if r.success:
@@ -513,7 +485,7 @@ The execution results are ground-truth from running the real function."""
         return len(new_keys - prior_keys)
 
     async def _get_exploration_plan(self, func: Function) -> ExplorationPlan:
-        """Ask the LLM for exploration snippets (Round 1 — static reasoning)."""
+        """Request initial exploration snippets from the model."""
         with logfire.span("codemode.llm_explore", func_name=func.name, round=1):
             prompt = f"""Explore the following function by writing test snippets:
 
@@ -545,7 +517,7 @@ behaviour across all important scenarios.  Use the real function name
         prior_results: list[SnippetResult],
         cluster_summary: str,
     ) -> ExplorationPlan:
-        """Ask the LLM for targeted snippets (Round 2 — evidence-based)."""
+        """Request targeted snippets using prior execution evidence."""
         with logfire.span("codemode.llm_explore", func_name=func.name, round=2):
             prompt = f"""You previously explored `{func.name}` and the snippets were
 executed.  Below are the ACTUAL results and a cluster summary.
@@ -597,14 +569,11 @@ RULES:
         func: Function,
         exploration_results: list[SnippetResult],
         failure_context: str | None = None,
-    ) -> str:
-        """Phase 2: Generate YAML spec using verified exploration results.
+    ) -> str | EvalsBundle:
+        """Generate a spec from verified exploration results.
 
-        Parameters
-        ----------
-        failure_context:
-            When provided (on refinement rounds), appended to the prompt so
-            the LLM can fix specific failures from the previous attempt.
+        Returns YAML text in default mode, or ``EvalsBundle`` when
+        ``use_model_spec=True``.
         """
         with logfire.span(
             "codemode.generate_spec",
@@ -685,6 +654,18 @@ YAML FORMAT — STRICT RULES (violations cause parse failure):
             )
 
             result = await self.spec_agent.run(prompt)
+
+            if self.use_model_spec:
+                bundle = result.output
+                assert isinstance(bundle, EvalsBundle)
+                logfire.info(
+                    "Model spec bundle generated",
+                    func_name=func.name,
+                    eval_count=len(bundle.evals),
+                    fixture_count=len(bundle.fixtures),
+                )
+                return bundle
+
             yaml_spec = result.output.yaml_spec
 
             # Sanitize: strip ALL !!<tag> annotations — safe_load only accepts
@@ -739,7 +720,7 @@ YAML FORMAT — STRICT RULES (violations cause parse failure):
 
     @staticmethod
     def _build_failure_context(summary: EvalSummary) -> str:
-        """Build a concise failure report to inject into the retry prompt."""
+        """Build retry context from failed assertions/errors."""
         return build_failure_context(summary)
 
     def _inject_durations(
@@ -750,7 +731,7 @@ YAML FORMAT — STRICT RULES (violations cause parse failure):
         buffer_pct: float = 0.5,
         floor_ms: float = 10.0,
     ) -> str:
-        """Add per-case ``duration`` fields based on actual execution times."""
+        """Inject measured duration thresholds into cases."""
         return inject_durations(
             yaml_spec,
             func,
@@ -761,7 +742,7 @@ YAML FORMAT — STRICT RULES (violations cause parse failure):
 
     @staticmethod
     def _build_call_code(func_name: str, case: dict) -> str | None:
-        """Build a ``func(args...)`` call string from a case dict."""
+        """Build a callable expression from a dataset case."""
         return build_call_code(func_name, case)
 
     # -- Full pipeline -----------------------------------------------------
@@ -776,46 +757,11 @@ YAML FORMAT — STRICT RULES (violations cause parse failure):
         min_coverage: float = 1.0,
         inject_durations: bool = True,
     ) -> CodeModeResult:
-        """Run the full CodeMode pipeline with post-generation validation.
+        """Run full CodeMode generation, validation, and optional refinement.
 
-        Pipeline::
-
-            Phase 1: explore()                        (2 rounds by default)
-              Round 1 — static reasoning (speculation-based)
-              Round 2 — targeted exploration (evidence-based)
-            Phase 2: generate_spec()                  (may loop)
-            Phase 3: validate via RunEvals            (per attempt)
-            Phase 4: refine on failure                (up to N rounds)
-            Phase 5: inject_durations()               (once, at end)
-
-        Exploration (Phase 1) runs in two rounds.  Round 1 uses static
-        reasoning; Round 2 receives a cluster summary of Round 1 results
-        and targets uncovered behaviour classes.  Only spec generation
-        (Phase 2) is re-run on validation failure.
-
-        Parameters
-        ----------
-        func:
-            The function to generate evals for.
-        run_evals:
-            Whether to run the generated evals and include the summary.
-        save_to_file:
-            Whether to save the YAML spec to ``{func.name}_evals.yml``.
-        max_refinement_rounds:
-            Maximum number of spec-regeneration attempts after the initial
-            generation (0 = single attempt, no refinement).
-        min_coverage:
-            Target pass-rate in 0.0–1.0 (default 1.0 = 100 %).  The loop
-            exits early when coverage meets or exceeds this threshold.
-        inject_durations:
-            Whether to measure and inject per-case ``duration`` fields
-            into the final YAML spec.
-
-        Returns
-        -------
-        CodeModeResult
-            Contains exploration results, YAML spec, summary, and
-            the number of refinement rounds used.
+        Flow: explore -> generate spec -> validate -> refine (optional) ->
+        inject durations (optional). Returns exploration artifacts, final spec,
+        and evaluation summary when ``run_evals`` is enabled.
         """
         with logfire.span(
             "codemode.pipeline",
@@ -831,6 +777,7 @@ YAML FORMAT — STRICT RULES (violations cause parse failure):
 
             # Phase 2–4 — generate spec + validate + refine
             yaml_spec = ""
+            generated_bundle: EvalsBundle | None = None
             summary: EvalSummary | None = None
             refinement_rounds = 0
             failure_context: str | None = None
@@ -843,18 +790,25 @@ YAML FORMAT — STRICT RULES (violations cause parse failure):
                     is_refinement=attempt > 0,
                 ):
                     try:
-                        yaml_spec = await self.generate_spec(
+                        bundle = await self.generate_spec(
                             func,
                             exploration_results,
                             failure_context,
                         )
-                    except Exception as gen_exc:
+
+                        if isinstance(bundle, EvalsBundle):
+                            generated_bundle = bundle
+                            yaml_spec = bundle.to_yaml()
+                        else:
+                            generated_bundle = None
+                            yaml_spec = bundle
+                    except Exception as exc:
                         logfire.warn(
                             "Spec generation failed on attempt {attempt}, retrying",
                             attempt=attempt + 1,
-                            error=str(gen_exc),
+                            error=str(exc),
                         )
-                        failure_context = f"Generation error: {gen_exc}"
+                        failure_context = f"Generation error: {exc}"
                         refinement_rounds = attempt + 1
                         continue
 
@@ -863,11 +817,18 @@ YAML FORMAT — STRICT RULES (violations cause parse failure):
 
                     # Validate: run evals with ignore_duration=True
                     try:
-                        runner = (
-                            RunEvals.from_source(yaml_spec)
-                            .with_functions({func.name: func.impl})
-                            .ignore_duration()
-                        )
+                        if generated_bundle is not None:
+                            runner = (
+                                RunEvals.from_bundle(generated_bundle)
+                                .with_functions({func.name: func.impl})
+                                .ignore_duration()
+                            )
+                        else:
+                            runner = (
+                                RunEvals.from_source(yaml_spec)
+                                .with_functions({func.name: func.impl})
+                                .ignore_duration()
+                            )
                         summary = runner.run()
 
                         logfire.info(
@@ -912,19 +873,27 @@ YAML FORMAT — STRICT RULES (violations cause parse failure):
             # Final summary run (with durations now present, but still ignored)
             if run_evals and summary is not None:
                 try:
-                    final_runner = (
-                        RunEvals.from_source(yaml_spec)
-                        .with_functions({func.name: func.impl})
-                        .ignore_duration()
-                    )
+                    if generated_bundle is not None:
+                        final_runner = (
+                            RunEvals.from_bundle(generated_bundle)
+                            .with_functions({func.name: func.impl})
+                            .ignore_duration()
+                        )
+                    else:
+                        final_runner = (
+                            RunEvals.from_source(yaml_spec)
+                            .with_functions({func.name: func.impl})
+                            .ignore_duration()
+                        )
                     summary = final_runner.run()
                 except Exception:  # noqa: BLE001
                     pass  # keep last good summary
 
             if save_to_file:
                 path = f"{func.name}_evals.yml"
+                spec_to_write = materialize_yaml_with_schema_header(yaml_spec)
                 with open(path, "w") as f:
-                    f.write(yaml_spec)
+                    f.write(spec_to_write)
                 logfire.info("Saved spec to {path}", path=path)
 
             elapsed = (time.perf_counter() - t0) * 1000
