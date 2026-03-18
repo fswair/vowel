@@ -58,6 +58,8 @@ summary = (
 )
 ```
 
+> Key matching note: If YAML eval ids use `module.function`, both programmatic maps accept either the exact id (`module.function`) or short name (`function`) keys in `.with_functions(...)`, `.with_serializer(...)`, and `serial_fn={...}`.
+
 ---
 
 ## Advanced Examples

@@ -198,6 +198,28 @@ class TestSchemaSerializer:
         assert summary.all_passed
         assert summary.total_count == 1
 
+    def test_serializer_short_name_matches_module_function_spec(self):
+        """Serializer mapping by short name should work for module.function eval ids."""
+        spec = {
+            "pkg.get_user_info": {
+                "dataset": [
+                    {
+                        "case": {
+                            "input": {"id": 1, "name": "Alice", "email": "a@a.com"},
+                            "expected": "User Alice has email a@a.com",
+                        }
+                    },
+                ]
+            }
+        }
+        summary = (
+            RunEvals.from_dict(spec)
+            .with_functions({"get_user_info": get_user_info})
+            .with_serializer({"get_user_info": User})
+            .run()
+        )
+        assert summary.all_passed
+
 
 class TestSerialFn:
     """Tests for serial_fn-based serialization."""

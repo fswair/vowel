@@ -3,9 +3,9 @@
     "prompt_preview": "generate_and_run",
     "model": "openrouter:google/gemini-3-flash-preview",
     "response": {
-      "yaml_spec": "double:\n  evals:\n    CorrectType:\n      type: int\n    DoubleLogic:\n      assertion: output == input * 2\n    NonNegativeIfInputNonNegative:\n      assertion: input < 0 or output >= input\n  dataset:\n  - case:\n      id: positive_integer\n      input: 5\n      expected: 10\n  - case:\n      id: zero\n      input: 0\n      expected: 0\n  - case:\n      id: negative_integer\n      input: -4\n      expected: -8\n  - case:\n      id: large_integer\n      input: 1000000\n      expected: 2000000\n  - case:\n      id: sequence_multiplication_check\n      input: 1\n      expected: 2\n  - case:\n      id: invalid_type_string\n      input: '10'\n      assertion: output == '1010'\n",
+      "yaml_spec": "double:\n  evals:\n    IsInteger:\n      type: int\n    CorrectCalculation:\n      assertion: output == input * 2\n    FastEnough:\n      duration: 0.001\n  dataset:\n  - case:\n      id: positive_integer\n      input: 10\n      expected: 20\n  - case:\n      id: negative_integer\n      input: -5\n      expected: -10\n  - case:\n      id: zero_input\n      input: 0\n      expected: 0\n  - case:\n      id: large_integer\n      input: 1000000\n      expected: 2000000\n  - case:\n      id: string_input_error\n      input: '5'\n      assertion: output == '55'\n      type: str\n",
       "was_healed": false,
-      "coverage": 0.8333333333333334
+      "coverage": 0.0
     }
   }
 }

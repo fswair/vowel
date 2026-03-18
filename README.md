@@ -122,6 +122,8 @@ summary = (
 summary.print()
 ```
 
+> **Name matching note:** If your YAML uses `module.function`, programmatic mappings can use either the exact key (`module.function`) or the short function name (`function`) in `.with_functions(...)`.
+
 ---
 
 ## Features
@@ -195,6 +197,8 @@ summary = (
     .run()
 )
 ```
+
+> **Serializer key matching:** Serializer mappings follow the same rule as `.with_functions(...)` — both `module.function` and short `function` keys are accepted.
 
 > **Full reference:** [docs/SERIALIZERS.md](https://github.com/fswair/vowel/blob/main/docs/SERIALIZERS.md)
 

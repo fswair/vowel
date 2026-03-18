@@ -27,6 +27,239 @@ from .utils import EvalsBundle, EvalSummary, load_bundle, run_evals
 
 dotenv.load_dotenv()
 console = Console()
+COSTS_FILE = Path.home() / ".vowel" / "codemode" / "generation_costs.json"
+
+
+def _load_cost_store() -> dict:
+    if not COSTS_FILE.exists():
+        return {"schema_version": 1, "generations": {}}
+    try:
+        data = json.loads(COSTS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {"schema_version": 1, "generations": {}}
+    if not isinstance(data, dict):
+        return {"schema_version": 1, "generations": {}}
+    generations = data.get("generations")
+    if not isinstance(generations, dict):
+        data["generations"] = {}
+    return data
+
+
+def _flatten_runs(store: dict) -> list[tuple[str, dict, dict]]:
+    rows: list[tuple[str, dict, dict]] = []
+    for gid, gen in store.get("generations", {}).items():
+        runs = gen.get("runs", {}) if isinstance(gen, dict) else {}
+        if not isinstance(runs, dict):
+            continue
+        for run_id, run in runs.items():
+            rows.append((gid, gen, {"run_id": run_id, **run}))
+    return rows
+
+
+def _print_generation_table(store: dict) -> list[str]:
+    generations = store.get("generations", {})
+    ordered = sorted(
+        generations.items(),
+        key=lambda x: str(x[1].get("created_at", "")),
+        reverse=True,
+    )
+    table = Table(title="Generations", box=box.ROUNDED)
+    table.add_column("#", style="cyan", no_wrap=True)
+    table.add_column("Generation ID", style="white")
+    table.add_column("Created", style="dim")
+    table.add_column("Runs", justify="right")
+    table.add_column("USD", justify="right", style="green")
+
+    ids: list[str] = []
+    for idx, (gid, gen) in enumerate(ordered, start=1):
+        totals = gen.get("totals", {})
+        run_count = len(gen.get("runs", {})) if isinstance(gen.get("runs", {}), dict) else 0
+        table.add_row(
+            str(idx),
+            gid,
+            str(gen.get("created_at", "-")),
+            str(run_count),
+            f"{float(totals.get('usd', 0.0) or 0.0):.6f}",
+        )
+        ids.append(gid)
+
+    console.print(table)
+    return ids
+
+
+def _print_generation_detail(generation_id: str, generation: dict) -> None:
+    totals = generation.get("totals", {})
+    info = Table.grid(padding=(0, 2))
+    info.add_column(style="bold")
+    info.add_column()
+    info.add_row("Generation", generation_id)
+    info.add_row("Created", str(generation.get("created_at", "-")))
+    info.add_row("Spec model", str(generation.get("spec_model", "-")))
+    info.add_row("Exploration model", str(generation.get("exploration_model", "-")))
+    info.add_row("USD", f"{float(totals.get('usd', 0.0) or 0.0):.6f}")
+    info.add_row("Input tokens", str(int(totals.get("input_tokens", 0) or 0)))
+    info.add_row("Output tokens", str(int(totals.get("output_tokens", 0) or 0)))
+    info.add_row("Requests", str(int(totals.get("requests", 0) or 0)))
+    console.print(Panel(info, title="Generation Summary", border_style="bright_cyan"))
+
+    run_table = Table(title="Runs", box=box.ROUNDED)
+    run_table.add_column("Run ID", style="white")
+    run_table.add_column("Function", style="cyan")
+    run_table.add_column("Status")
+    run_table.add_column("USD", justify="right", style="green")
+    run_table.add_column("Input", justify="right")
+    run_table.add_column("Output", justify="right")
+    run_table.add_column("Requests", justify="right")
+    run_table.add_column("Created", style="dim")
+
+    runs = generation.get("runs", {}) if isinstance(generation.get("runs", {}), dict) else {}
+    for run_id, run in runs.items():
+        rt = run.get("totals", {})
+        run_table.add_row(
+            run_id,
+            str(run.get("func_name", "-")),
+            str(run.get("status", "-")),
+            f"{float(rt.get('usd', 0.0) or 0.0):.6f}",
+            str(int(rt.get("input_tokens", 0) or 0)),
+            str(int(rt.get("output_tokens", 0) or 0)),
+            str(int(rt.get("requests", 0) or 0)),
+            str(run.get("created_at", "-")),
+        )
+    console.print(run_table)
+
+
+def _print_run_detail(generation_id: str, run: dict) -> None:
+    totals = run.get("totals", {})
+    info = Table.grid(padding=(0, 2))
+    info.add_column(style="bold")
+    info.add_column()
+    info.add_row("Generation", generation_id)
+    info.add_row("Run", str(run.get("run_id", "-")))
+    info.add_row("Function", str(run.get("func_name", "-")))
+    info.add_row("Status", str(run.get("status", "-")))
+    info.add_row("USD", f"{float(totals.get('usd', 0.0) or 0.0):.6f}")
+    info.add_row("Input tokens", str(int(totals.get("input_tokens", 0) or 0)))
+    info.add_row("Output tokens", str(int(totals.get("output_tokens", 0) or 0)))
+    info.add_row("Requests", str(int(totals.get("requests", 0) or 0)))
+    console.print(Panel(info, title="Run Summary", border_style="bright_cyan"))
+
+    step_table = Table(title="Steps", box=box.ROUNDED)
+    step_table.add_column("Step", style="white")
+    step_table.add_column("Calls", justify="right")
+    step_table.add_column("USD", justify="right", style="green")
+    step_table.add_column("Input", justify="right")
+    step_table.add_column("Output", justify="right")
+    step_table.add_column("Requests", justify="right")
+
+    steps = run.get("steps", {}) if isinstance(run.get("steps", {}), dict) else {}
+    for step_name, step_data in steps.items():
+        usages = step_data.get("usages", []) if isinstance(step_data, dict) else []
+        usd = 0.0
+        input_tokens = 0
+        output_tokens = 0
+        requests = 0
+        for u in usages:
+            usage = u.get("usage", {}) if isinstance(u, dict) else {}
+            usd += float(u.get("usd", 0.0) or 0.0)
+            input_tokens += int(usage.get("input_tokens", 0) or 0)
+            output_tokens += int(usage.get("output_tokens", 0) or 0)
+            requests += int(usage.get("requests", 0) or 0)
+
+        step_table.add_row(
+            step_name,
+            str(len(usages)),
+            f"{usd:.6f}",
+            str(input_tokens),
+            str(output_tokens),
+            str(requests),
+        )
+
+    console.print(step_table)
+
+
+def _handle_costs_command(
+    *,
+    list_costs: bool,
+    by_generation: bool,
+    by_run: bool,
+    generation_id: str | None,
+    run_id: str | None,
+) -> None:
+    store = _load_cost_store()
+    generations = store.get("generations", {})
+    if not generations:
+        console.print("[yellow]No cost records found yet.[/yellow]")
+        return
+
+    if generation_id:
+        generation = generations.get(generation_id)
+        if not isinstance(generation, dict):
+            click.secho(f"ERROR: Generation not found: {generation_id}", fg="red", err=True)
+            raise SystemExit(1)
+        _print_generation_detail(generation_id, generation)
+        return
+
+    if run_id:
+        for gid, gen in generations.items():
+            runs = gen.get("runs", {}) if isinstance(gen, dict) else {}
+            if isinstance(runs, dict) and run_id in runs:
+                run = {"run_id": run_id, **runs[run_id]}
+                _print_run_detail(gid, run)
+                return
+        click.secho(f"ERROR: Run not found: {run_id}", fg="red", err=True)
+        raise SystemExit(1)
+
+    if not list_costs:
+        _print_generation_table(store)
+        return
+
+    if by_generation:
+        ids = _print_generation_table(store)
+        if not ids:
+            return
+        choice = click.prompt("Select generation number", type=int)
+        if choice < 1 or choice > len(ids):
+            click.secho("ERROR: Invalid selection", fg="red", err=True)
+            raise SystemExit(1)
+        selected = ids[choice - 1]
+        _print_generation_detail(selected, generations[selected])
+        return
+
+    if by_run:
+        rows = _flatten_runs(store)
+        if not rows:
+            console.print("[yellow]No runs found.[/yellow]")
+            return
+
+        table = Table(title="Runs", box=box.ROUNDED)
+        table.add_column("#", style="cyan", no_wrap=True)
+        table.add_column("Run ID", style="white")
+        table.add_column("Generation", style="dim")
+        table.add_column("Function", style="cyan")
+        table.add_column("Status")
+        table.add_column("USD", justify="right", style="green")
+
+        for idx, (gid, _, run) in enumerate(rows, start=1):
+            totals = run.get("totals", {})
+            table.add_row(
+                str(idx),
+                str(run.get("run_id", "-")),
+                gid,
+                str(run.get("func_name", "-")),
+                str(run.get("status", "-")),
+                f"{float(totals.get('usd', 0.0) or 0.0):.6f}",
+            )
+        console.print(table)
+
+        choice = click.prompt("Select run number", type=int)
+        if choice < 1 or choice > len(rows):
+            click.secho("ERROR: Invalid selection", fg="red", err=True)
+            raise SystemExit(1)
+        gid, _, run = rows[choice - 1]
+        _print_run_detail(gid, run)
+        return
+
+    _print_generation_table(store)
 
 
 def _eval_type_label(case) -> str:
@@ -282,6 +515,21 @@ def validate_coverage(ctx, param, value):
     is_flag=True,
     help="With 'vowel schema': generate vowel-schema.json in current directory",
 )
+@click.option("--list", "list_costs", is_flag=True, help="With 'vowel costs': list records")
+@click.option(
+    "-g",
+    "--by-generation",
+    is_flag=True,
+    help="With 'vowel costs --list': browse generations interactively",
+)
+@click.option(
+    "-r",
+    "--by-run",
+    is_flag=True,
+    help="With 'vowel costs --list': browse runs interactively",
+)
+@click.option("--generation", "generation_id", help="With 'vowel costs': show generation id")
+@click.option("--run", "run_id_option", help="With 'vowel costs': show run id")
 def main(
     arg1: Path | None,
     arg2: Path | None,
@@ -302,6 +550,11 @@ def main(
     verbose: bool,
     hide_report: bool,
     schema_create: bool,
+    list_costs: bool,
+    by_generation: bool,
+    by_run: bool,
+    generation_id: str | None,
+    run_id_option: str | None,
 ):
     """vowel — YAML-based evaluation framework for Python functions."""
     console = Console(force_terminal=False, no_color=True) if no_color else Console()
@@ -366,6 +619,17 @@ def main(
         console.print(f"[green]✓[/green] Updated schema header: [cyan]{target_path}[/cyan]")
 
         console.print("[green]✓[/green] Pydantic validation passed")
+        return
+
+    # Command mode: vowel costs [--list -g|-r] [--generation <id>] [--run <id>]
+    if arg1 is not None and str(arg1) == "costs":
+        _handle_costs_command(
+            list_costs=list_costs,
+            by_generation=by_generation,
+            by_run=by_run,
+            generation_id=generation_id,
+            run_id=run_id_option,
+        )
         return
 
     yaml_file = arg1

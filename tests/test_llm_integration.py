@@ -11,10 +11,10 @@ import pytest
 
 dotenv.load_dotenv()
 
-DEFAULT_MODEL = os.getenv("MODEL_NAME", "openrouter:google/gemini-3-flash-preview")
+DEFAULT_MODEL = "openrouter:google/gemini-3-flash-preview"
 
 pytestmark = pytest.mark.skipif(
-    not os.getenv("OPENROUTER_API_KEY") and not os.getenv("OPENAI_API_KEY"),
+    not os.getenv("OPENROUTER_API_KEY"),
     reason="No API key available for LLM tests (need OPENROUTER_API_KEY or OPENAI_API_KEY)",
 )
 

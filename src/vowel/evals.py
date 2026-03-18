@@ -11,7 +11,13 @@ import logfire
 from pydantic import ValidationError
 from pydantic.type_adapter import TypeAdapter
 from pydantic_ai.settings import ModelSettings
-from pydantic_evals.evaluators import EvaluationReason, Evaluator, EvaluatorContext, LLMJudge
+from pydantic_evals.evaluators import (
+    EvaluationReason,
+    Evaluator,
+    EvaluatorContext,
+    LLMJudge,
+    OutputConfig,  # noqa: F401
+)
 
 MONTY_AVAILABLE = bool(importlib.util.find_spec("pydantic-monty"))
 
@@ -396,6 +402,9 @@ def create_llm_judge(
     include: list[str] | None = None,
     config: dict | None = None,
 ) -> LLMJudge:
+    # Imported lazily to avoid circular import at module import time.
+    from .utils import _resolve_env_ref
+
     if config is None:
         config = {}
 
@@ -405,14 +414,8 @@ def create_llm_judge(
             "'model' must be specified in config or set JUDGE_MODEL environment variable"
         )
 
-    if model.strip().startswith("$"):
-        env_var = model.strip().lstrip("$")
-        model = os.getenv(env_var)
-        if not model:
-            raise ValueError(
-                f"Environment variable {env_var} is not set for judge model, "
-                f"set {env_var} to a valid model name."
-            )
+    model = _resolve_env_ref(model, field_name="model")
+    rubric = _resolve_env_ref(rubric, field_name="rubric")
 
     include_input = False
     include_expected_output = False

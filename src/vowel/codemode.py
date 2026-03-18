@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 
 from vowel.context import EVAL_SPEC_CONTEXT
+from vowel.costs import CostManager
 from vowel.eval_types import EvalsSource
 from vowel.executor import ExecutionResult, Executor, resolve_executors
 from vowel.monitoring import enable_monitoring
@@ -178,6 +179,7 @@ class CodeModeGenerator:
         self,
         spec_model: str | None = None,
         exploration_model: str | None = None,
+        generation_id: str | None = None,
         default_executor: Executor | None = None,
         fallback_executor: Executor | None = None,
         additional_context: str = "",
@@ -203,6 +205,13 @@ class CodeModeGenerator:
         self.additional_context = additional_context
         self.min_snippets = min_snippets
         self.use_model_spec = use_model_spec
+        self.cost_manager = CostManager(
+            spec_model=self.spec_model,
+            exploration_model=self.exploration_model,
+            generation_id=generation_id,
+        )
+        self.generation_id = self.cost_manager.generation_id
+        self._active_run_id: str | None = None
         self._opts = opts
 
         # Lazy agents
@@ -213,8 +222,12 @@ class CodeModeGenerator:
             "CodeModeGenerator initialized",
             spec_model=self.spec_model,
             exploration_model=self.exploration_model,
+            generation_id=self.generation_id,
             executor=type(self.executor).__name__,
         )
+
+    def print_total_cost(self, run_id: str | None = None) -> None:
+        self.cost_manager.print_total_cost(run_id=run_id)
 
     # -- Agent properties --------------------------------------------------
 
@@ -280,6 +293,13 @@ STRICT RULES:
 - Use the function's REAL NAME — the function source code will be prepended
   automatically at runtime.  Do NOT define the function yourself.
 - Keep each snippet focused on ONE scenario.
+- Do NOT produce duplicate snippets.  Two snippets are duplicates if they test
+    the same input shape and same behavior class.
+- For `error_snippets`, each snippet must map to a DISTINCT error mode
+    (different guard/branch, exception type, or message pattern).
+- If the function signature has no positional-only (`/`) or keyword-only (`*`)
+    limiters, prefer positional call style for multi-argument calls and avoid
+    equivalent keyword-style duplicates.
 - Do NOT guess outputs — the snippets will be executed and the real
   outputs collected automatically.
 - NEVER use try/except in your snippets.  Let exceptions propagate
@@ -309,6 +329,7 @@ The execution results are ground-truth from running the real function."""
         func: Function,
         *,
         exploration_rounds: int = 2,
+        run_id: str | None = None,
     ) -> list[SnippetResult]:
         """Generate and execute exploration snippets.
 
@@ -331,13 +352,15 @@ The execution results are ground-truth from running the real function."""
                 ):
                     # Get exploration plan (round 2+ includes prior context)
                     if round_num == 1:
-                        plan = await self._get_exploration_plan(func)
+                        plan = await self._get_exploration_plan(func, run_id=run_id)
                     else:
                         cluster_summary = self._build_cluster_summary(all_results)
                         plan = await self._get_targeted_exploration_plan(
                             func,
                             all_results,
                             cluster_summary,
+                            run_id=run_id,
+                            round_num=round_num,
                         )
                         # Early exit: if no new snippets were produced
                         if not plan.snippets and not plan.error_snippets:
@@ -484,7 +507,12 @@ The execution results are ground-truth from running the real function."""
         new_keys = {_behavior_key(r) for r in new}
         return len(new_keys - prior_keys)
 
-    async def _get_exploration_plan(self, func: Function) -> ExplorationPlan:
+    async def _get_exploration_plan(
+        self,
+        func: Function,
+        *,
+        run_id: str | None = None,
+    ) -> ExplorationPlan:
         """Request initial exploration snippets from the model."""
         with logfire.span("codemode.llm_explore", func_name=func.name, round=1):
             prompt = f"""Explore the following function by writing test snippets:
@@ -500,6 +528,13 @@ behaviour across all important scenarios.  Use the real function name
 `{func.name}` — the implementation will be prepended automatically."""
 
             result = await self.explorer_agent.run(prompt)
+            if run_id:
+                self.cost_manager.record_agent_usage(
+                    run_id=run_id,
+                    step_key="exploration_round_1",
+                    result=result,
+                    model_name=self.exploration_model,
+                )
             plan = result.output
 
             logfire.info(
@@ -516,6 +551,9 @@ behaviour across all important scenarios.  Use the real function name
         func: Function,
         prior_results: list[SnippetResult],
         cluster_summary: str,
+        *,
+        run_id: str | None = None,
+        round_num: int = 2,
     ) -> ExplorationPlan:
         """Request targeted snippets using prior execution evidence."""
         with logfire.span("codemode.llm_explore", func_name=func.name, round=2):
@@ -547,10 +585,21 @@ RULES:
 - Do NOT repeat any snippet from the "Already tried" list.
 - Produce 8–12 NEW normal snippets targeting uncovered behaviour.
 - Produce 3–5 NEW error snippets targeting untried error paths.
+- Prefer diversity over volume: no semantically duplicate cases.
+- Each new error snippet should cover a unique failure mode.
+- If signature has no `/` or `*` limiters, use positional calling style for
+    multi-argument calls and avoid keyword/positional duplicates of same scenario.
 - Same strict rules as before: no try/except, real function name,
   one scenario per snippet, last expression captured."""
 
             result = await self.explorer_agent.run(prompt)
+            if run_id:
+                self.cost_manager.record_agent_usage(
+                    run_id=run_id,
+                    step_key=f"targeted_exploration_round_{round_num}",
+                    result=result,
+                    model_name=self.exploration_model,
+                )
             plan = result.output
 
             logfire.info(
@@ -569,6 +618,9 @@ RULES:
         func: Function,
         exploration_results: list[SnippetResult],
         failure_context: str | None = None,
+        *,
+        run_id: str | None = None,
+        attempt: int = 1,
     ) -> str | EvalsBundle:
         """Generate a spec from verified exploration results.
 
@@ -632,10 +684,28 @@ REQUIREMENTS:
 - The top-level YAML key MUST be `{func.name}` (the function name).
 - Generate at least {max(len(exploration_results), 5)} diverse test cases.
 - Use the EXACT outputs from the execution results above.
-- You MUST generate exactly {len(error_results)} raises cases — one for
-  each RAISED result above.  The spec is invalid without them.
+- Error coverage rule: include AT LEAST one raises case for each UNIQUE
+    observed error mode (exception type + meaningfully distinct call pattern).
+- Do NOT duplicate semantically equivalent error cases. If two cases represent
+    the same failing input semantics, keep only one (prefer the one with `match`
+    when message is deterministic from observed execution).
 - Cover normal, edge, and error cases.
 - In assertions, use `input` (NOT `inputs`) for accessing input values.
+- Prefer `expected` over `assertion` whenever the exact output is known from
+    verified execution results.
+- Use `assertion` only for true invariants/properties that are not redundant
+    with exact `expected` values.
+- Do NOT use broad/trivial assertions (e.g. `output >= 0`, `output <= len(input)`)
+    when a precise expected value can be asserted.
+- Keep the dataset compact and non-redundant: no duplicate cases with the same
+    effective behavior.
+- If function signature has no positional-only (`/`) or keyword-only (`*`)
+    limiters, prefer positional style for multi-argument calls and do not include
+    both positional and keyword variants of the same scenario.
+- Stay aligned with function contract/type hints: do not add contract-irrelevant
+    cases that only test incidental duck-typing unless explicitly motivated.
+- For `raises` cases, only claim exception type/message patterns that are present
+    in observed execution results; do not invent unsupported error expectations.
 
 YAML FORMAT — STRICT RULES (violations cause parse failure):
 - NEVER use YAML tags: `!!python/tuple`, `!!python/object`, `!!binary`,
@@ -654,6 +724,13 @@ YAML FORMAT — STRICT RULES (violations cause parse failure):
             )
 
             result = await self.spec_agent.run(prompt)
+            if run_id:
+                self.cost_manager.record_agent_usage(
+                    run_id=run_id,
+                    step_key=f"spec_generation_attempt_{attempt}",
+                    result=result,
+                    model_name=self.spec_model,
+                )
 
             if self.use_model_spec:
                 bundle = result.output
@@ -751,6 +828,7 @@ YAML FORMAT — STRICT RULES (violations cause parse failure):
         self,
         func: Function,
         *,
+        run_id: str | None = None,
         run_evals: bool = True,
         save_to_file: bool = False,
         max_refinement_rounds: int = 2,
@@ -766,149 +844,162 @@ YAML FORMAT — STRICT RULES (violations cause parse failure):
         with logfire.span(
             "codemode.pipeline",
             func_name=func.name,
+            generation_id=self.generation_id,
             spec_model=self.spec_model,
             exploration_model=self.exploration_model,
             executor=type(self.executor).__name__,
         ):
+            run_id = self.cost_manager.start_run(run_id=run_id, func_name=func.name)
+            self._active_run_id = run_id
+
             t0 = time.perf_counter()
 
-            # Phase 1 — explore (once)
-            exploration_results = await self.explore(func)
+            try:
+                # Phase 1 — explore (once)
+                exploration_results = await self.explore(func, run_id=run_id)
 
-            # Phase 2–4 — generate spec + validate + refine
-            yaml_spec = ""
-            generated_bundle: EvalsBundle | None = None
-            summary: EvalSummary | None = None
-            refinement_rounds = 0
-            failure_context: str | None = None
-            total_attempts = max_refinement_rounds + 1 if run_evals else 1
+                # Phase 2–4 — generate spec + validate + refine
+                yaml_spec = ""
+                generated_bundle: EvalsBundle | None = None
+                summary: EvalSummary | None = None
+                refinement_rounds = 0
+                failure_context: str | None = None
+                total_attempts = max_refinement_rounds + 1 if run_evals else 1
 
-            for attempt in range(total_attempts):
-                with logfire.span(
-                    "codemode.spec_attempt",
-                    attempt=attempt + 1,
-                    is_refinement=attempt > 0,
-                ):
-                    try:
-                        bundle = await self.generate_spec(
-                            func,
-                            exploration_results,
-                            failure_context,
-                        )
+                for attempt in range(total_attempts):
+                    with logfire.span(
+                        "codemode.spec_attempt",
+                        attempt=attempt + 1,
+                        is_refinement=attempt > 0,
+                    ):
+                        try:
+                            bundle = await self.generate_spec(
+                                func,
+                                exploration_results,
+                                failure_context,
+                                run_id=run_id,
+                                attempt=attempt + 1,
+                            )
 
-                        if isinstance(bundle, EvalsBundle):
-                            generated_bundle = bundle
-                            yaml_spec = bundle.to_yaml()
-                        else:
-                            generated_bundle = None
-                            yaml_spec = bundle
-                    except Exception as exc:
-                        logfire.warn(
-                            "Spec generation failed on attempt {attempt}, retrying",
-                            attempt=attempt + 1,
-                            error=str(exc),
-                        )
-                        failure_context = f"Generation error: {exc}"
-                        refinement_rounds = attempt + 1
-                        continue
+                            if isinstance(bundle, EvalsBundle):
+                                generated_bundle = bundle
+                                yaml_spec = bundle.to_yaml()
+                            else:
+                                generated_bundle = None
+                                yaml_spec = bundle
+                        except Exception as exc:
+                            logfire.warn(
+                                "Spec generation failed on attempt {attempt}, retrying",
+                                attempt=attempt + 1,
+                                error=str(exc),
+                            )
+                            failure_context = f"Generation error: {exc}"
+                            refinement_rounds = attempt + 1
+                            continue
 
-                    if not run_evals:
-                        break
+                        if not run_evals:
+                            break
 
-                    # Validate: run evals with ignore_duration=True
+                        # Validate: run evals with ignore_duration=True
+                        try:
+                            if generated_bundle is not None:
+                                runner = (
+                                    RunEvals.from_bundle(generated_bundle)
+                                    .with_functions({func.name: func.impl})
+                                    .ignore_duration()
+                                )
+                            else:
+                                runner = (
+                                    RunEvals.from_source(yaml_spec)
+                                    .with_functions({func.name: func.impl})
+                                    .ignore_duration()
+                                )
+                            summary = runner.run()
+
+                            logfire.info(
+                                "Attempt {attempt}: {passed}/{total} passed, coverage={coverage:.1f}%",
+                                attempt=attempt + 1,
+                                passed=summary.success_count,
+                                total=summary.total_count,
+                                failed=summary.failed_count,
+                                errors=summary.error_count,
+                                coverage=summary.coverage * 100,
+                            )
+
+                            if summary.coverage >= min_coverage:
+                                break
+
+                            # Build failure context for next attempt
+                            failure_context = self._build_failure_context(summary)
+                            refinement_rounds = attempt + 1
+                            logfire.warn(
+                                "Coverage {coverage:.0f}% below target {target:.0f}%, refining",
+                                coverage=summary.coverage * 100,
+                                target=min_coverage * 100,
+                                attempt=attempt + 1,
+                            )
+
+                        except Exception as exc:
+                            logfire.warn(
+                                "Failed to run evals on attempt {attempt}, retrying",
+                                attempt=attempt + 1,
+                                func_name=func.name,
+                                error=str(exc),
+                            )
+                            failure_context = f"Eval run error: {exc}"
+                            refinement_rounds = attempt + 1
+                            continue
+
+                # Phase 5 — inject per-case durations
+                if inject_durations:
+                    with logfire.span("codemode.inject_durations", func_name=func.name):
+                        yaml_spec = self._inject_durations(yaml_spec, func)
+
+                # Final summary run (with durations now present, but still ignored)
+                if run_evals and summary is not None:
                     try:
                         if generated_bundle is not None:
-                            runner = (
+                            final_runner = (
                                 RunEvals.from_bundle(generated_bundle)
                                 .with_functions({func.name: func.impl})
                                 .ignore_duration()
                             )
                         else:
-                            runner = (
+                            final_runner = (
                                 RunEvals.from_source(yaml_spec)
                                 .with_functions({func.name: func.impl})
                                 .ignore_duration()
                             )
-                        summary = runner.run()
+                        summary = final_runner.run()
+                    except Exception:  # noqa: BLE001
+                        pass  # keep last good summary
 
-                        logfire.info(
-                            "Attempt {attempt}: {passed}/{total} passed, coverage={coverage:.1f}%",
-                            attempt=attempt + 1,
-                            passed=summary.success_count,
-                            total=summary.total_count,
-                            failed=summary.failed_count,
-                            errors=summary.error_count,
-                            coverage=summary.coverage * 100,
-                        )
+                if save_to_file:
+                    path = f"{func.name}_evals.yml"
+                    spec_to_write = materialize_yaml_with_schema_header(yaml_spec)
+                    with open(path, "w") as f:
+                        f.write(spec_to_write)
+                    logfire.info("Saved spec to {path}", path=path)
 
-                        if summary.coverage >= min_coverage:
-                            break
+                elapsed = (time.perf_counter() - t0) * 1000
+                self.cost_manager.mark_run_completed(run_id)
+                logfire.info(
+                    "CodeMode pipeline complete in {elapsed:.0f}ms (refinements={refinement_rounds})",
+                    elapsed=elapsed,
+                    func_name=func.name,
+                    generation_id=self.generation_id,
+                    run_id=run_id,
+                    exploration_count=len(exploration_results),
+                    refinement_rounds=refinement_rounds,
+                    has_summary=summary is not None,
+                )
 
-                        # Build failure context for next attempt
-                        failure_context = self._build_failure_context(summary)
-                        refinement_rounds = attempt + 1
-                        logfire.warn(
-                            "Coverage {coverage:.0f}% below target {target:.0f}%, refining",
-                            coverage=summary.coverage * 100,
-                            target=min_coverage * 100,
-                            attempt=attempt + 1,
-                        )
-
-                    except Exception as exc:
-                        logfire.warn(
-                            "Failed to run evals on attempt {attempt}, retrying",
-                            attempt=attempt + 1,
-                            func_name=func.name,
-                            error=str(exc),
-                        )
-                        failure_context = f"Eval run error: {exc}"
-                        refinement_rounds = attempt + 1
-                        continue
-
-            # Phase 5 — inject per-case durations
-            if inject_durations:
-                with logfire.span("codemode.inject_durations", func_name=func.name):
-                    yaml_spec = self._inject_durations(yaml_spec, func)
-
-            # Final summary run (with durations now present, but still ignored)
-            if run_evals and summary is not None:
-                try:
-                    if generated_bundle is not None:
-                        final_runner = (
-                            RunEvals.from_bundle(generated_bundle)
-                            .with_functions({func.name: func.impl})
-                            .ignore_duration()
-                        )
-                    else:
-                        final_runner = (
-                            RunEvals.from_source(yaml_spec)
-                            .with_functions({func.name: func.impl})
-                            .ignore_duration()
-                        )
-                    summary = final_runner.run()
-                except Exception:  # noqa: BLE001
-                    pass  # keep last good summary
-
-            if save_to_file:
-                path = f"{func.name}_evals.yml"
-                spec_to_write = materialize_yaml_with_schema_header(yaml_spec)
-                with open(path, "w") as f:
-                    f.write(spec_to_write)
-                logfire.info("Saved spec to {path}", path=path)
-
-            elapsed = (time.perf_counter() - t0) * 1000
-            logfire.info(
-                "CodeMode pipeline complete in {elapsed:.0f}ms (refinements={refinement_rounds})",
-                elapsed=elapsed,
-                func_name=func.name,
-                exploration_count=len(exploration_results),
-                refinement_rounds=refinement_rounds,
-                has_summary=summary is not None,
-            )
-
-            return CodeModeResult(
-                exploration_results=exploration_results,
-                yaml_spec=yaml_spec,
-                summary=summary,
-                refinement_rounds=refinement_rounds,
-            )
+                return CodeModeResult(
+                    exploration_results=exploration_results,
+                    yaml_spec=yaml_spec,
+                    summary=summary,
+                    refinement_rounds=refinement_rounds,
+                )
+            except Exception as exc:
+                self.cost_manager.mark_run_failed(run_id, str(exc))
+                raise

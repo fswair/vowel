@@ -147,6 +147,24 @@ class TestRunEvalsWithFunctions:
 
         assert summary.all_passed
 
+    def test_with_functions_short_name_matches_module_function_spec(self):
+        """module.function eval ids should match short-name keys from with_functions."""
+
+        def add(a, b):
+            return a + b
+
+        spec = {
+            "pkg.add": {
+                "dataset": [
+                    {"case": {"inputs": {"a": 1, "b": 2}, "expected": 3}},
+                ]
+            }
+        }
+
+        summary = RunEvals.from_dict(spec).with_functions({"add": add}).run()
+
+        assert summary.all_passed
+
     def test_with_executor_preserves_existing_run_behavior(self, simple_yaml_spec: str):
         """Executor preferences should be accepted without changing normal eval behavior."""
         summary = (

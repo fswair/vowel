@@ -3,7 +3,7 @@
     "prompt_preview": "generate_spec",
     "model": "openrouter:google/gemini-3-flash-preview",
     "response": {
-      "yaml_spec": "reverse_string:\n  evals:\n    IsString:\n      type: str\n    ReverseProperty:\n      assertion: output[::-1] == input\n    LengthInvariant:\n      assertion: len(output) == len(input)\n  dataset:\n  - case:\n      id: typical_word\n      input: hello\n      expected: olleh\n  - case:\n      id: empty_string\n      input: ''\n      expected: ''\n  - case:\n      id: single_character\n      input: z\n      expected: z\n  - case:\n      id: palindrome\n      input: racecar\n      expected: racecar\n  - case:\n      id: strings_with_spaces\n      input: abc def\n      expected: fed cba\n  - case:\n      id: numeric_string\n      input: '12345'\n      expected: '54321'\n  - case:\n      id: special_characters\n      input: '!@#$%^&*()'\n      expected: )(*&^%$#@!\n",
+      "yaml_spec": "reverse_string:\n  evals:\n    IsString:\n      type: str\n    CorrectLength:\n      assertion: len(output) == len(input)\n    IdentityProperty:\n      assertion: output[::-1] == input\n  dataset:\n  - case:\n      id: normal_word\n      input: hello\n      expected: olleh\n  - case:\n      id: empty_string\n      input: ''\n      expected: ''\n  - case:\n      id: single_character\n      input: A\n      expected: A\n  - case:\n      id: with_spaces\n      input: nurses run\n      expected: nur sesrun\n  - case:\n      id: palindrome\n      input: racecar\n      expected: racecar\n  - case:\n      id: numeric_string\n      input: '123456789'\n      expected: '987654321'\n  - case:\n      id: special_characters\n      input: '!@#$%^&*'\n      expected: '*&^%$#@!'\n",
       "func_name": "reverse_string"
     }
   }

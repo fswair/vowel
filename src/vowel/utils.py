@@ -130,6 +130,24 @@ YAML_SERIALIZABLE_ORIGINS = {
 }
 
 
+def _resolve_env_ref(
+    value: str, *, field_name: str, scope: Literal["judge", "model"] | str = "judge"
+) -> str:
+    """Resolve $ENV_VAR references used in YAML evaluator settings."""
+    value = value.strip()
+    if not value.startswith("$"):
+        return value
+
+    env_var = value.lstrip("$")
+    resolved = os.getenv(env_var)
+    if not resolved:
+        raise ValueError(
+            f"Environment variable {env_var} is not set for {scope} {field_name}, "
+            f"set {env_var} to a valid value."
+        )
+    return resolved
+
+
 def is_yaml_serializable_type(type_hint: Any) -> bool:
     """
     Check if a type hint represents a YAML-serializable type.
@@ -1225,6 +1243,42 @@ def _merge_programmatic_fixtures(
     return merged_fixtures, fixture_funcs
 
 
+def _resolve_eval_id_mapping(
+    mapping: Mapping[str, Any] | None,
+    eval_id: str,
+    *,
+    mapping_name: str,
+) -> Any | None:
+    """Resolve mapping entries by exact id first, then by short function name.
+
+    Supports using programmatic keys like ``{"func": fn}`` for specs that use
+    ``module.func`` eval ids.
+    """
+    if not mapping:
+        return None
+
+    if eval_id in mapping:
+        return mapping[eval_id]
+
+    short_name = eval_id.rsplit(".", 1)[-1]
+    if short_name in mapping:
+        return mapping[short_name]
+
+    # Reverse direction: when eval id is bare and mapping uses module.function.
+    if "." not in eval_id:
+        matches = [value for key, value in mapping.items() if key.rsplit(".", 1)[-1] == eval_id]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            candidates = sorted({key for key in mapping if key.rsplit(".", 1)[-1] == eval_id})
+            raise ValueError(
+                f"Ambiguous {mapping_name} mapping for '{eval_id}'. "
+                f"Provide an exact key. Candidates: {candidates}"
+            )
+
+    return None
+
+
 def _import_and_detect_class_method(
     eval_id: str,
     functions: dict[str, Callable] | None,
@@ -1238,8 +1292,9 @@ def _import_and_detect_class_method(
         - class_path: Full module.ClassName path for class methods, None otherwise
         - class_name: Class name for class methods, None otherwise
     """
-    if functions and eval_id in functions:
-        func = functions[eval_id]
+    resolved_func = _resolve_eval_id_mapping(functions, eval_id, mapping_name="function")
+    if resolved_func is not None:
+        func = resolved_func
         # Check if bound method (exclude builtin functions where __self__ is the module)
         self_obj = getattr(func, "__self__", None)
         if self_obj is not None and not isinstance(self_obj, types.ModuleType):
@@ -1491,8 +1546,10 @@ def _evaluate_single_function(
         )
 
         # Get serializers for this function if defined
-        func_schema = schema.get(eval_id)
-        func_serial_fn = serial_fn.get(eval_id)
+        func_schema = _resolve_eval_id_mapping(schema, eval_id, mapping_name="serializer schema")
+        func_serial_fn = _resolve_eval_id_mapping(
+            serial_fn, eval_id, mapping_name="serializer function"
+        )
 
         # Setup module-scoped fixtures for this eval
         module_fixtures = {}

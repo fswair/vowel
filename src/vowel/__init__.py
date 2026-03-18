@@ -8,6 +8,7 @@ __version__ = importlib.metadata.version("vowel")
 from .ai import EvalGenerator, GenerationResult, UnsupportedParameterTypeError
 from .codemode import CodeModeGenerator, CodeModeResult, ExplorationPlan, SnippetResult
 from .context import EVAL_SPEC_CONTEXT
+from .costs import CostManager
 from .errors import FixturePathError, SignatureError
 from .eval_types import EvalsFile
 from .executor import (
@@ -75,6 +76,7 @@ __all__ = [
     "CodeModeResult",
     "ExplorationPlan",
     "SnippetResult",
+    "CostManager",
 ]
 
 
