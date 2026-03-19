@@ -69,3 +69,7 @@ evaluations/
 # !!
 TODO
 docs/FIXTURE_GENERATION_RFC.md
+
+# Benchmarks
+benchmark*
+important-links.md

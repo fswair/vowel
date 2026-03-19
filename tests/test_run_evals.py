@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from vowel import EvalSummary, RunEvals, run_evals
+from vowel.executor import DefaultExecutor
 
 
 class TestRunEvalsFromFile:
@@ -146,6 +147,46 @@ class TestRunEvalsWithFunctions:
 
         assert summary.all_passed
 
+    def test_with_functions_short_name_matches_module_function_spec(self):
+        """module.function eval ids should match short-name keys from with_functions."""
+
+        def add(a, b):
+            return a + b
+
+        spec = {
+            "pkg.add": {
+                "dataset": [
+                    {"case": {"inputs": {"a": 1, "b": 2}, "expected": 3}},
+                ]
+            }
+        }
+
+        summary = RunEvals.from_dict(spec).with_functions({"add": add}).run()
+
+        assert summary.all_passed
+
+    def test_with_executor_preserves_existing_run_behavior(self, simple_yaml_spec: str):
+        """Executor preferences should be accepted without changing normal eval behavior."""
+        summary = (
+            RunEvals.from_source(simple_yaml_spec)
+            .with_functions({"add": lambda a, b: a + b})
+            .with_executor(DefaultExecutor(), fallback_executor=DefaultExecutor())
+            .run()
+        )
+
+        assert summary.all_passed
+
+    def test_run_evals_accepts_executor_preferences(self, simple_yaml_spec: str):
+        """Top-level run_evals should accept executor preferences."""
+        summary = run_evals(
+            simple_yaml_spec,
+            functions={"add": lambda a, b: a + b},
+            executor=DefaultExecutor(),
+            fallback_executor=DefaultExecutor(),
+        )
+
+        assert summary.all_passed
+
 
 class TestRunEvalsFilter:
     """Tests for filter() method."""
@@ -196,6 +237,81 @@ class TestRunEvalsFilter:
         )
 
         assert summary.total_count == 2
+
+    def test_filter_module_name_matches_short_eval_id(self):
+        """module.function filter should match bare function eval ids."""
+        spec = {
+            "add": {"dataset": [{"case": {"inputs": {"a": 1, "b": 2}, "expected": 3}}]},
+            "sub": {"dataset": [{"case": {"inputs": {"a": 5, "b": 3}, "expected": 2}}]},
+        }
+
+        summary = (
+            RunEvals.from_dict(spec)
+            .with_functions(
+                {
+                    "add": lambda a, b: a + b,
+                    "sub": lambda a, b: a - b,
+                }
+            )
+            .filter(["math.add"])
+            .run()
+        )
+
+        assert summary.total_count == 1
+        assert summary.results[0].eval_id == "add"
+
+    def test_filter_short_name_matches_module_eval_id(self):
+        """bare function filter should match module.function eval ids."""
+        spec = {
+            "pkg.add": {
+                "dataset": [
+                    {"case": {"inputs": {"a": 1, "b": 2}, "expected": 3}},
+                ]
+            },
+            "pkg.sub": {
+                "dataset": [
+                    {"case": {"inputs": {"a": 5, "b": 3}, "expected": 2}},
+                ]
+            },
+        }
+
+        summary = (
+            RunEvals.from_dict(spec)
+            .with_functions(
+                {
+                    "add": lambda a, b: a + b,
+                    "sub": lambda a, b: a - b,
+                }
+            )
+            .filter(["add"])
+            .run()
+        )
+
+        assert summary.total_count == 1
+        assert summary.results[0].eval_id == "pkg.add"
+
+    def test_filter_short_name_raises_on_ambiguous_matches(self):
+        """Short-name filters should fail fast when multiple eval ids share a suffix."""
+        spec = {
+            "pkg.add": {
+                "dataset": [
+                    {"case": {"inputs": {"a": 1, "b": 2}, "expected": 3}},
+                ]
+            },
+            "other.add": {
+                "dataset": [
+                    {"case": {"inputs": {"a": 2, "b": 3}, "expected": 5}},
+                ]
+            },
+        }
+
+        with pytest.raises(ValueError, match="Ambiguous filter 'add'"):
+            (
+                RunEvals.from_dict(spec)
+                .with_functions({"add": lambda a, b: a + b})
+                .filter(["add"])
+                .run()
+            )
 
 
 class TestRunEvalsDebug:

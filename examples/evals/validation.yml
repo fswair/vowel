@@ -7,11 +7,11 @@ examples.evals.functions.validate_email:
       type: bool
       strict: true
   dataset:
-    - case: { input: "user@example.com", expected: true }
-    - case: { input: "invalid.email", expected: false }
-    - case: { input: "test@domain.co.uk", expected: true }
-    - case: { input: "@nodomain.com", expected: false }
-    - case: { input: "spaces @mail.com", expected: false }
+    - case: { id: email_valid_basic, input: "user@example.com", expected: true }
+    - case: { id: email_invalid_missing_at, input: "invalid.email", expected: false }
+    - case: { id: email_valid_subdomain, input: "test@domain.co.uk", expected: true }
+    - case: { id: email_invalid_missing_user, input: "@nodomain.com", expected: false }
+    - case: { id: email_invalid_with_space, input: "spaces @mail.com", expected: false }
 
 examples.evals.functions.classify_age_group:
   evals:
@@ -26,22 +26,23 @@ examples.evals.functions.classify_age_group:
         (18 <= input < 65 and output == 'adult') or\
         (input >= 65 and output == 'senior')
   dataset:
-    - case: { input: 5, expected: "child" }
-    - case: { input: 15, expected: "teenager" }
-    - case: { input: 30, expected: "adult" }
-    - case: { input: 70, expected: "senior" }
-    - case: { input: 12, expected: "child" }
-    - case: { input: 18, expected: "adult" }
-    - case: { input: 65, expected: "senior" }
+    - case: { id: age_5_child, input: 5, expected: "child" }
+    - case: { id: age_15_teenager, input: 15, expected: "teenager" }
+    - case: { id: age_30_adult, input: 30, expected: "adult" }
+    - case: { id: age_70_senior, input: 70, expected: "senior" }
+    - case: { id: age_12_child_boundary, input: 12, expected: "child" }
+    - case: { id: age_18_adult_boundary, input: 18, expected: "adult" }
+    - case: { id: age_65_senior_boundary, input: 65, expected: "senior" }
 
 examples.evals.functions.format_phone:
   evals:
     PhoneFormat:
       pattern: "^\\(\\d{3}\\) \\d{3}-\\d{4}$"
   dataset:
-    - case: { input: "5551234567", expected: "(555) 123-4567" }
-    - case: { input: "2129876543", expected: "(212) 987-6543" }
+    - case: { id: phone_valid_555, input: "5551234567", expected: "(555) 123-4567" }
+    - case: { id: phone_valid_212, input: "2129876543", expected: "(212) 987-6543" }
     - case:
+        id: phone_short_raises
         input: "123"
         raises: ValueError
         match: "10 digits"
@@ -52,11 +53,14 @@ examples.evals.functions.parse_json:
       type: dict
   dataset:
     - case:
+        id: json_valid_object
         input: '{"key": "value", "n": 42}'
         expected: { key: "value", n: 42 }
     - case:
+        id: json_invalid_returns_empty
         input: "invalid json"
         expected: {}
     - case:
+        id: json_nested_object
         input: '{"nested": {"ok": true}}'
         expected: { nested: { ok: true } }

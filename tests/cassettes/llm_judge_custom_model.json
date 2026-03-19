@@ -4,7 +4,7 @@
     "input_preview": "john doe",
     "result": {
       "passed": false,
-      "model": "openrouter:google/gemini-3-flash-preview"
+      "model": "openrouter:anthropic/claude-opus-4.6"
     }
   }
 }

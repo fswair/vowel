@@ -1,63 +1,4 @@
-"""Vowel MCP Server - Model Context Protocol server for eval generation.
-
-This module exposes vowel's full evaluation, generation, and TDD capabilities via
-MCP (Model Context Protocol), enabling AI assistants to run evaluations, generate
-functions, create test specs, and perform TDD workflows.
-
-Configuration is set via the ``env`` field in your MCP client JSON config.
-The env field should contain API keys and model names only. All other parameters
-(auto_retry, min_coverage, etc.) are tool parameters with sensible defaults.
-
-Usage:
-    # Add to MCP client config (e.g., Claude Desktop, VS Code Copilot)
-    {
-        "mcpServers": {
-            "vowel": {
-                "command": "python",
-                "args": ["-m", "vowel.mcp_server"],
-                "env": {
-                    "MODEL_NAME": "openai:gpt-4o",
-                    "OPENAI_API_KEY": "sk-..."
-                }
-            }
-        }
-    }
-
-    # Or run directly (reads env vars from shell)
-    python -m vowel.mcp_server
-
-Supported env vars:
-    MODEL_NAME          — Default LLM model (e.g. "openai:gpt-4o", "gemini-3-flash-preview")
-    JUDGE_MODEL         — Model for LLM Judge evaluator
-    OPENAI_API_KEY      — OpenAI API key
-    ANTHROPIC_API_KEY   — Anthropic API key
-    GOOGLE_API_KEY      — Google AI API key
-
-Available Tools (14):
-    Eval Runner:
-        - run_evals_from_file: Run evaluations from a YAML file
-        - run_evals_from_yaml: Run evaluations from YAML content string
-        - run_evals_with_fixtures: Run evaluations with fixture injection
-        - validate_yaml_spec: Validate a YAML eval specification
-        - check_function_compatibility: Check function compatibility with eval generation
-        - list_yaml_files: List YAML files in a directory
-
-    EvalGenerator:
-        - generate_function: Generate a Python function from description
-        - generate_eval_spec: Generate eval spec for a function
-        - generate_and_run_evals: Generate spec + run + auto-retry + heal
-
-    TDDGenerator:
-        - tdd_generate_signature: Generate function signature from description
-        - tdd_generate_evals: Generate eval spec from a signature
-        - tdd_generate_implementation: Generate implementation from signature + spec
-        - tdd_generate_all: Full TDD flow: description → signature → evals → implementation
-        - tdd_generate_and_validate: TDD with eval validation against implementation
-
-Available Resources:
-    - vowel://context: Eval specification documentation
-    - vowel://example: Example YAML eval specification
-"""
+"""MCP server exposing vowel evaluation, generation, and TDD tools."""
 
 from __future__ import annotations
 
@@ -67,11 +8,12 @@ from typing import Any
 import nest_asyncio
 from mcp.server.fastmcp import FastMCP
 
-from vowel import check_compatibility, load_evals_from_yaml_string, run_evals
+from vowel import check_compatibility, run_evals
 from vowel.ai import EVAL_SPEC_CONTEXT, EvalGenerator
 from vowel.monitoring import enable_monitoring
 from vowel.runner import Function, RunEvals
 from vowel.tdd import TDDGenerator
+from vowel.utils import load_bundle_from_yaml_string
 
 enable_monitoring(service_name="vowel-mcp")
 
@@ -204,8 +146,8 @@ def validate_yaml_spec(yaml_content: str) -> dict[str, Any]:
         yaml_content: YAML eval specification to validate
     """
     try:
-        evals = load_evals_from_yaml_string(yaml_content)
-        function_names = list(evals.keys())
+        bundle = load_bundle_from_yaml_string(yaml_content)
+        function_names = list(bundle.evals.keys())
         return {
             "valid": True,
             "functions": function_names,

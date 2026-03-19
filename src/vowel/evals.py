@@ -1,40 +1,161 @@
-"""Evaluator implementations for the vowel framework.
-
-This module contains the concrete evaluator classes that implement
-the evaluation logic defined in eval_types.py. Each evaluator
-integrates with pydantic-evals to provide result reporting.
-
-Evaluators:
-    AssertionEvaluator: Runs Python assertion expressions
-    TypeAdapterEvaluator: Validates output types using Pydantic
-    ContainsInputEvaluator: Checks if output contains input value
-    PatternMatchingEvaluator: Validates output against regex patterns
-    RaisesEvaluator: Validates expected exception raising
-
-Factory functions:
-    create_llm_judge: Creates an LLM-based judge evaluator
-    prepare_env_and_condition: Prepares evaluation context
-"""
+"""Concrete evaluator implementations used by the vowel runtime."""
 
 import importlib.util
-import logging
 import os
 import re
 import typing
 from contextlib import suppress
 from dataclasses import dataclass
 
+import logfire
 from pydantic import ValidationError
 from pydantic.type_adapter import TypeAdapter
 from pydantic_ai.settings import ModelSettings
-from pydantic_evals.evaluators import EvaluationReason, Evaluator, EvaluatorContext, LLMJudge
-
-logger = logging.getLogger(__name__)
+from pydantic_evals.evaluators import (
+    EvaluationReason,
+    Evaluator,
+    EvaluatorContext,
+    LLMJudge,
+    OutputConfig,  # noqa: F401
+)
 
 MONTY_AVAILABLE = bool(importlib.util.find_spec("pydantic-monty"))
 
+SAFE_ASSERTION_BUILTINS = {
+    "abs": abs,
+    "all": all,
+    "any": any,
+    "bool": bool,
+    "dict": dict,
+    "enumerate": enumerate,
+    "float": float,
+    "int": int,
+    "isinstance": isinstance,
+    "len": len,
+    "list": list,
+    "max": max,
+    "min": min,
+    "range": range,
+    "round": round,
+    "set": set,
+    "sorted": sorted,
+    "str": str,
+    "sum": sum,
+    "tuple": tuple,
+    "type": type,
+    "zip": zip,
+}
 
-def prepare_env_and_condition(ctx: EvaluatorContext, condition: str) -> tuple[dict, str]:
+SAFE_TYPE_NAMES = {
+    "Any": typing.Any,
+    "None": None,
+    "bool": bool,
+    "bytes": bytes,
+    "dict": dict,
+    "float": float,
+    "frozenset": frozenset,
+    "int": int,
+    "list": list,
+    "object": object,
+    "set": set,
+    "str": str,
+    "tuple": tuple,
+    "typing": typing,
+}
+SAFE_TYPE_NAMES.update(
+    {name: getattr(typing, name) for name in dir(typing) if not name.startswith("_")}
+)
+
+
+def _eval_assertion_restricted(condition: str, inputs: dict[str, typing.Any]) -> bool:
+    env = {"__builtins__": SAFE_ASSERTION_BUILTINS}
+    env.update(inputs)
+    return bool(eval(condition, env, env))
+
+
+def _eval_type_restricted(type_expr: str) -> typing.Any:
+    env = {"__builtins__": {}}
+    env.update(SAFE_TYPE_NAMES)
+    return eval(type_expr, env, env)
+
+
+def _apply_serializer_for_assertion(
+    value: typing.Any,
+    serializer: type | typing.Callable | dict[str, type | typing.Callable] | None,
+    *,
+    param_name: str | None = None,
+) -> typing.Any:
+    """Apply serializer in assertion path to mirror function call conversions."""
+    if serializer is None:
+        return value
+
+    if isinstance(serializer, dict):
+        if param_name and param_name in serializer:
+            return _apply_serializer_for_assertion(value, serializer[param_name])
+        if isinstance(value, dict):
+            converted: dict[str, typing.Any] = {}
+            for key, item in value.items():
+                if key in serializer:
+                    converted[key] = _apply_serializer_for_assertion(item, serializer[key])
+                else:
+                    converted[key] = item
+            return converted
+        return value
+
+    if isinstance(value, dict):
+        try:
+            return serializer(**value)
+        except TypeError:
+            return serializer(value)
+
+    return serializer(value)
+
+
+def _normalize_input_for_assertion(
+    raw_inputs: typing.Any,
+    serializer: type | typing.Callable | dict[str, type | typing.Callable] | None,
+    serializer_fn: typing.Callable[[dict], typing.Any] | None,
+) -> typing.Any:
+    """Compute assertion `input` value from raw case inputs using active serializer config."""
+    if not isinstance(raw_inputs, dict):
+        return _apply_serializer_for_assertion(raw_inputs, serializer)
+
+    if serializer_fn is not None:
+        serialized = serializer_fn(raw_inputs)
+        if isinstance(serialized, tuple):
+            return serialized[0] if len(serialized) == 1 else serialized
+        return serialized
+
+    if "input" in raw_inputs:
+        return _apply_serializer_for_assertion(raw_inputs["input"], serializer)
+
+    if "inputs" in raw_inputs:
+        values = raw_inputs["inputs"]
+        if values is None:
+            return None
+        if isinstance(values, dict):
+            if serializer is not None and not isinstance(serializer, dict):
+                return _apply_serializer_for_assertion(values, serializer)
+            if isinstance(serializer, dict):
+                return {
+                    key: _apply_serializer_for_assertion(item, serializer, param_name=key)
+                    for key, item in values.items()
+                }
+            return values
+        if serializer is None:
+            return values
+        return [_apply_serializer_for_assertion(item, serializer) for item in values]
+
+    return raw_inputs
+
+
+def prepare_env_and_condition(
+    ctx: EvaluatorContext,
+    condition: str,
+    *,
+    serializer: type | typing.Callable | dict[str, type | typing.Callable] | None = None,
+    serializer_fn: typing.Callable[[dict], typing.Any] | None = None,
+) -> tuple[dict, str]:
     """
     Prepare environment variables and format condition string for evaluation.
 
@@ -45,12 +166,7 @@ def prepare_env_and_condition(ctx: EvaluatorContext, condition: str) -> tuple[di
     Returns:
         Tuple of (environment dict, formatted condition string)
     """
-    actual_input = ctx.inputs
-    if isinstance(ctx.inputs, dict):
-        if "input" in ctx.inputs:
-            actual_input = ctx.inputs["input"]
-        elif "inputs" in ctx.inputs:
-            actual_input = ctx.inputs["inputs"]
+    actual_input = _normalize_input_for_assertion(ctx.inputs, serializer, serializer_fn)
 
     env = {
         "input": actual_input,
@@ -77,9 +193,18 @@ class AssertionEvaluator(Evaluator):
     metrics, metadata, and duration variables.
     """
 
-    def __init__(self, condition: str, *, evaluation_name: str = "Assertion"):
+    def __init__(
+        self,
+        condition: str,
+        *,
+        evaluation_name: str = "Assertion",
+        serializer: type | typing.Callable | dict[str, type | typing.Callable] | None = None,
+        serializer_fn: typing.Callable[[dict], typing.Any] | None = None,
+    ):
         self.condition = condition
         self.evaluation_name = evaluation_name
+        self.serializer = serializer
+        self.serializer_fn = serializer_fn
         self.interpreter = None
         if MONTY_AVAILABLE:
             import pydantic_monty
@@ -96,7 +221,12 @@ class AssertionEvaluator(Evaluator):
             return EvaluationReason(value=True, reason="Skipped (exception case)")
         if "__import__" in self.condition:
             raise ValueError(f"__import__ is not allowed in assertions: {self.condition}")
-        env, condition = prepare_env_and_condition(ctx, self.condition)
+        env, condition = prepare_env_and_condition(
+            ctx,
+            self.condition,
+            serializer=self.serializer,
+            serializer_fn=self.serializer_fn,
+        )
 
         # TL;DR
         # BETA API
@@ -126,6 +256,20 @@ class AssertionEvaluator(Evaluator):
                 )
 
         except Exception:
+            pass
+
+        try:
+            if _eval_assertion_restricted(self.condition, inputs):
+                return EvaluationReason(
+                    value=True, reason=f"Assertion passed for condition: {condition}"
+                )
+        except Exception as exc:
+            logfire.info(
+                "Restricted assertion eval failed; falling back to raw eval",
+                condition=self.condition,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
             with suppress(Exception):
                 if eval(self.condition, inputs, inputs):
                     return EvaluationReason(
@@ -150,15 +294,8 @@ class TypeAdapterEvaluator(Evaluator):
         """Validate that output matches the expected type."""
         if isinstance(ctx.output, dict) and "_exception" in ctx.output:
             return EvaluationReason(value=True, reason="Skipped (exception case)")
-        type_env = {
-            "typing": typing,
-            "__import__": None,
-            "eval": None,
-            "exec": None,
-            "compile": None,
-        }
         try:
-            expected_type = eval(self.type, type_env, type_env)
+            expected_type = _eval_type_restricted(self.type)
             ta = TypeAdapter(expected_type)
         except Exception:
             return EvaluationReason(
@@ -328,7 +465,9 @@ class RaisesEvaluator(Evaluator):
             )
         if self.expected_exception_match:
             exception_message = str(actual_exception)
-            if not re.search(self.expected_exception_match, exception_message, re.I):
+            if self.expected_exception_match != exception_message and not re.search(
+                self.expected_exception_match, exception_message, re.I
+            ):
                 return EvaluationReason(
                     value=False,
                     reason=(
@@ -348,6 +487,9 @@ def create_llm_judge(
     include: list[str] | None = None,
     config: dict | None = None,
 ) -> LLMJudge:
+    # Imported lazily to avoid circular import at module import time.
+    from .utils import _resolve_env_ref
+
     if config is None:
         config = {}
 
@@ -357,14 +499,8 @@ def create_llm_judge(
             "'model' must be specified in config or set JUDGE_MODEL environment variable"
         )
 
-    if model.strip().startswith("$"):
-        env_var = model.strip().lstrip("$")
-        model = os.getenv(env_var)
-        if not model:
-            raise ValueError(
-                f"Environment variable {env_var} is not set for judge model, "
-                f"set {env_var} to a valid model name."
-            )
+    model = _resolve_env_ref(model, field_name="model")
+    rubric = _resolve_env_ref(rubric, field_name="rubric")
 
     include_input = False
     include_expected_output = False

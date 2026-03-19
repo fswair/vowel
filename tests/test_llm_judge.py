@@ -1,7 +1,4 @@
-"""LLM Judge evaluator tests with cassette caching.
-
-These tests specifically test the LLMJudge evaluator functionality.
-"""
+"""Tests for LLMJudge evaluator behavior using cassette caching."""
 
 import hashlib
 import json

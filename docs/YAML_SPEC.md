@@ -10,7 +10,8 @@ fixtures:
   fixture_name:
     setup: module.setup_func      # Import path to setup function
     teardown: module.teardown_func # Import path to teardown (optional)
-    scope: function                # function | module | session
+    scope: case                    # preferred: case | eval | file
+                                   # aliases: function | module | session
     kwargs:                        # Keyword arguments for setup function (optional)
       key: value
 
@@ -116,18 +117,18 @@ fixtures:
   db:
     setup: myapp.fixtures.setup_db
     teardown: myapp.fixtures.close_db
-    scope: module          # Created once, shared across all cases
+    scope: eval            # Created once, shared across all cases
     params:
       db_name: test_db
 
   cache:
     setup: myapp.fixtures.setup_cache
-    scope: session         # Created once per run_evals call
+    scope: file            # Created once per run_evals call
 
   temp_dir:
     setup: myapp.fixtures.create_temp_dir
     teardown: myapp.fixtures.remove_temp_dir
-    scope: function        # Created fresh for each case (default)
+    scope: case            # Created fresh for each case (default)
 
 # Function depends on 'db' fixture
 query_user:
@@ -185,9 +186,14 @@ summary = (
 ```
 
 **Fixture scopes:**
-- `function` (default): Setup/teardown for **each** test case
-- `module`: Setup once per eval spec, teardown after all cases
-- `session`: Setup once per `run_evals()` call, teardown at end
+- Preferred names:
+  - `case` (default): Setup/teardown for **each** test case
+  - `eval`: Setup once per eval spec, teardown after all cases
+  - `file`: Setup once per `run_evals()` call, teardown at end
+- Backward-compatible aliases:
+  - `function` = `case`
+  - `module` = `eval`
+  - `session` = `file`
 
 > See [FIXTURES.md](./FIXTURES.md) for the complete fixture guide including Python API patterns.
 

@@ -1,0 +1,762 @@
+# yaml-language-server: $schema=/Users/mert/.vowel/vowel-schema_035.json
+
+largestPathValue:
+  evals:
+    ReturnType:
+      type: int
+    ResultRange:
+      assertion: output >= -1
+  dataset:
+  - case:
+      id: example_abaca
+      inputs:
+        colors: abaca
+        edges:
+        - - 0
+          - 1
+        - - 0
+          - 2
+        - - 2
+          - 3
+        - - 3
+          - 4
+      expected: 3
+      duration: 10.0
+  - case:
+      id: example_cycle_self_loop
+      inputs:
+        colors: a
+        edges:
+        - - 0
+          - 0
+      expected: -1
+      duration: 10.0
+  - case:
+      id: single_node_no_edges_a
+      inputs:
+        colors: a
+        edges: []
+      expected: 1
+      duration: 10.0
+  - case:
+      id: single_node_no_edges_z
+      inputs:
+        colors: z
+        edges: []
+      expected: 1
+      duration: 10.0
+  - case:
+      id: two_nodes_same_color
+      inputs:
+        colors: aa
+        edges:
+        - - 0
+          - 1
+      expected: 2
+      duration: 10.0
+  - case:
+      id: two_nodes_diff_color
+      inputs:
+        colors: ab
+        edges:
+        - - 0
+          - 1
+      expected: 1
+      duration: 10.0
+  - case:
+      id: linear_all_same_color
+      inputs:
+        colors: aaaa
+        edges:
+        - - 0
+          - 1
+        - - 1
+          - 2
+        - - 2
+          - 3
+      expected: 4
+      duration: 10.0
+  - case:
+      id: linear_alternating_colors
+      inputs:
+        colors: abab
+        edges:
+        - - 0
+          - 1
+        - - 1
+          - 2
+        - - 2
+          - 3
+      expected: 2
+      duration: 10.0
+  - case:
+      id: linear_five_same_color
+      inputs:
+        colors: aaaaa
+        edges:
+        - - 0
+          - 1
+        - - 1
+          - 2
+        - - 2
+          - 3
+        - - 3
+          - 4
+      expected: 5
+      duration: 10.0
+  - case:
+      id: linear_abcba
+      inputs:
+        colors: abcba
+        edges:
+        - - 0
+          - 1
+        - - 1
+          - 2
+        - - 2
+          - 3
+        - - 3
+          - 4
+      expected: 2
+      duration: 10.0
+  - case:
+      id: linear_a_then_bbbbb
+      inputs:
+        colors: abbbbb
+        edges:
+        - - 0
+          - 1
+        - - 1
+          - 2
+        - - 2
+          - 3
+        - - 3
+          - 4
+        - - 4
+          - 5
+      expected: 5
+      duration: 10.0
+  - case:
+      id: linear_aba
+      inputs:
+        colors: aba
+        edges:
+        - - 0
+          - 1
+        - - 1
+          - 2
+      expected: 2
+      duration: 10.0
+  - case:
+      id: dag_fork_aab
+      inputs:
+        colors: aab
+        edges:
+        - - 0
+          - 1
+        - - 0
+          - 2
+        - - 1
+          - 2
+      expected: 2
+      duration: 10.0
+  - case:
+      id: diamond_abba
+      inputs:
+        colors: abba
+        edges:
+        - - 0
+          - 1
+        - - 0
+          - 2
+        - - 1
+          - 3
+        - - 2
+          - 3
+      expected: 2
+      duration: 10.0
+  - case:
+      id: diamond_all_same
+      inputs:
+        colors: aaaa
+        edges:
+        - - 0
+          - 1
+        - - 0
+          - 2
+        - - 1
+          - 3
+        - - 2
+          - 3
+      expected: 3
+      duration: 10.0
+  - case:
+      id: diamond_all_distinct
+      inputs:
+        colors: hecb
+        edges:
+        - - 0
+          - 1
+        - - 0
+          - 2
+        - - 1
+          - 3
+        - - 2
+          - 3
+      expected: 1
+      duration: 10.0
+  - case:
+      id: no_edges_abc
+      inputs:
+        colors: abc
+        edges: []
+      expected: 1
+      duration: 10.0
+  - case:
+      id: no_edges_abcde
+      inputs:
+        colors: abcde
+        edges: []
+      expected: 1
+      duration: 10.0
+  - case:
+      id: two_components_aabba
+      inputs:
+        colors: aabba
+        edges:
+        - - 0
+          - 1
+        - - 1
+          - 2
+        - - 3
+          - 4
+      expected: 2
+      duration: 10.0
+  - case:
+      id: branching_aabba
+      inputs:
+        colors: aabba
+        edges:
+        - - 0
+          - 2
+        - - 1
+          - 2
+        - - 2
+          - 3
+        - - 2
+          - 4
+      expected: 2
+      duration: 10.0
+  - case:
+      id: branching_single_color_five
+      inputs:
+        colors: aaaaa
+        edges:
+        - - 0
+          - 1
+        - - 0
+          - 2
+        - - 1
+          - 3
+        - - 2
+          - 4
+      expected: 3
+      duration: 10.0
+  - case:
+      id: fan_in_sink_aaab
+      inputs:
+        colors: aaab
+        edges:
+        - - 0
+          - 3
+        - - 1
+          - 3
+        - - 2
+          - 3
+      expected: 1
+      duration: 10.0
+  - case:
+      id: fan_in_sink_aaaab
+      inputs:
+        colors: aaaab
+        edges:
+        - - 0
+          - 4
+        - - 1
+          - 4
+        - - 2
+          - 4
+        - - 3
+          - 4
+      expected: 1
+      duration: 10.0
+  - case:
+      id: cycle_three_nodes
+      inputs:
+        colors: abc
+        edges:
+        - - 0
+          - 1
+        - - 1
+          - 2
+        - - 2
+          - 0
+      expected: -1
+      duration: 10.0
+  - case:
+      id: cycle_with_extra_nodes
+      inputs:
+        colors: abcd
+        edges:
+        - - 0
+          - 1
+        - - 1
+          - 2
+        - - 2
+          - 1
+        - - 1
+          - 3
+      expected: -1
+      duration: 10.0
+  - case:
+      id: two_node_cycle
+      inputs:
+        colors: ab
+        edges:
+        - - 0
+          - 1
+        - - 1
+          - 0
+      expected: -1
+      duration: 10.0
+  - case:
+      id: back_edge_cycle
+      inputs:
+        colors: abcde
+        edges:
+        - - 0
+          - 1
+        - - 1
+          - 2
+        - - 2
+          - 3
+        - - 3
+          - 4
+        - - 4
+          - 1
+      expected: -1
+      duration: 10.0
+  - case:
+      id: self_loop_non_first_node
+      inputs:
+        colors: abc
+        edges:
+        - - 0
+          - 1
+        - - 1
+          - 2
+        - - 2
+          - 2
+      expected: -1
+      duration: 10.0
+  - case:
+      id: empty_string_no_edges
+      inputs:
+        colors: ''
+        edges: []
+      expected: 0
+      duration: 10.0
+  - case:
+      id: multi_edge_same_pair
+      inputs:
+        colors: ab
+        edges:
+        - - 0
+          - 1
+        - - 0
+          - 1
+      expected: 1
+      duration: 10.0
+  - case:
+      id: all_26_colors_chain
+      inputs:
+        colors: abcdefghijklmnopqrstuvwxyz
+        edges:
+        - - 0
+          - 1
+        - - 1
+          - 2
+        - - 2
+          - 3
+        - - 3
+          - 4
+        - - 4
+          - 5
+        - - 5
+          - 6
+        - - 6
+          - 7
+        - - 7
+          - 8
+        - - 8
+          - 9
+        - - 9
+          - 10
+        - - 10
+          - 11
+        - - 11
+          - 12
+        - - 12
+          - 13
+        - - 13
+          - 14
+        - - 14
+          - 15
+        - - 15
+          - 16
+        - - 16
+          - 17
+        - - 17
+          - 18
+        - - 18
+          - 19
+        - - 19
+          - 20
+        - - 20
+          - 21
+        - - 21
+          - 22
+        - - 22
+          - 23
+        - - 23
+          - 24
+        - - 24
+          - 25
+      expected: 1
+      duration: 10.0
+  - case:
+      id: alternating_ab_chain_10
+      inputs:
+        colors: ababababab
+        edges:
+        - - 0
+          - 1
+        - - 1
+          - 2
+        - - 2
+          - 3
+        - - 3
+          - 4
+        - - 4
+          - 5
+        - - 5
+          - 6
+        - - 6
+          - 7
+        - - 7
+          - 8
+        - - 8
+          - 9
+      expected: 5
+      duration: 10.0
+  - case:
+      id: all_same_color_linear_equals_n
+      inputs:
+        colors: aaaaaa
+        edges:
+        - - 0
+          - 1
+        - - 1
+          - 2
+        - - 2
+          - 3
+        - - 3
+          - 4
+        - - 4
+          - 5
+      expected: 6
+      duration: 10.0
+  - case:
+      id: list_of_chars_input
+      inputs:
+        colors:
+        - a
+        - b
+        - c
+        edges:
+        - - 0
+          - 1
+        - - 1
+          - 2
+      expected: 1
+      duration: 10.0
+  - case:
+      id: cycle_returns_minus_one
+      inputs:
+        colors: abcde
+        edges:
+        - - 0
+          - 1
+        - - 1
+          - 2
+        - - 2
+          - 3
+        - - 3
+          - 4
+        - - 4
+          - 2
+      assertion: output == -1
+      duration: 10.0
+  - case:
+      id: dag_result_at_least_one
+      inputs:
+        colors: abcdef
+        edges:
+        - - 0
+          - 1
+        - - 1
+          - 2
+        - - 3
+          - 4
+        - - 4
+          - 5
+      assertion: output >= 1
+      duration: 10.0
+  - case:
+      id: single_path_bounded_by_length
+      inputs:
+        colors: abcabc
+        edges:
+        - - 0
+          - 1
+        - - 1
+          - 2
+        - - 2
+          - 3
+        - - 3
+          - 4
+        - - 4
+          - 5
+      assertion: output >= 1 and output <= 6
+      duration: 10.0
+  - case:
+      id: w_shaped_dag
+      inputs:
+        colors: aabaa
+        edges:
+        - - 0
+          - 2
+        - - 1
+          - 2
+        - - 2
+          - 3
+        - - 2
+          - 4
+      assertion: output >= 1 and output <= 5
+      duration: 10.0
+  - case:
+      id: two_sources_one_sink_same_color
+      inputs:
+        colors: aaa
+        edges:
+        - - 0
+          - 2
+        - - 1
+          - 2
+      assertion: output == 2
+      duration: 10.0
+  - case:
+      id: long_path_single_color_at_ends
+      inputs:
+        colors: abcda
+        edges:
+        - - 0
+          - 1
+        - - 1
+          - 2
+        - - 2
+          - 3
+        - - 3
+          - 4
+      assertion: output == 2
+      duration: 10.0
+  - case:
+      id: star_topology_center_unique
+      inputs:
+        colors: baaaa
+        edges:
+        - - 0
+          - 1
+        - - 0
+          - 2
+        - - 0
+          - 3
+        - - 0
+          - 4
+      assertion: output == 1
+      duration: 10.0
+  - case:
+      id: chain_mostly_b_with_one_a
+      inputs:
+        colors: bbbba
+        edges:
+        - - 0
+          - 1
+        - - 1
+          - 2
+        - - 2
+          - 3
+        - - 3
+          - 4
+      expected: 4
+      duration: 10.0
+  - case:
+      id: error_none_colors
+      inputs:
+        colors: null
+        edges:
+        - - 0
+          - 1
+      raises: TypeError
+      match: has no len
+  - case:
+      id: error_none_edges
+      inputs:
+        colors: abc
+        edges: null
+      raises: TypeError
+      match: not iterable
+  - case:
+      id: error_int_colors
+      inputs:
+        colors: 123
+        edges:
+        - - 0
+          - 1
+      raises: TypeError
+      match: has no len
+  - case:
+      id: error_out_of_range_edge
+      inputs:
+        colors: ab
+        edges:
+        - - 0
+          - 5
+      raises: IndexError
+      match: list index out of range
+  - case:
+      id: error_empty_colors_with_edges
+      inputs:
+        colors: ''
+        edges:
+        - - 0
+          - 1
+      raises: IndexError
+      match: list index out of range
+  - case:
+      id: error_none_in_edge_list
+      inputs:
+        colors: abc
+        edges:
+        - null
+        - - 0
+          - 1
+      raises: TypeError
+      match: cannot unpack non-iterable NoneType
+  - case:
+      id: error_int_in_edge_list
+      inputs:
+        colors: abc
+        edges:
+        - 1
+        - - 0
+          - 1
+      raises: TypeError
+      match: cannot unpack non-iterable int
+  - case:
+      id: error_uppercase_color
+      inputs:
+        colors: A
+        edges: []
+      raises: IndexError
+      match: list assignment index out of range
+  - case:
+      id: error_string_in_edge_list
+      inputs:
+        colors: abc
+        edges:
+        - ab
+        - - 0
+          - 1
+      raises: TypeError
+      match: list indices must be integers or slices
+  - case:
+      id: error_typeerror_0
+      inputs:
+      - null
+      - - - 0
+          - 1
+      raises: TypeError
+  - case:
+      id: error_typeerror_1
+      inputs:
+      - abc
+      - null
+      raises: TypeError
+  - case:
+      id: error_typeerror_2
+      inputs:
+      - 123
+      - - - 0
+          - 1
+      raises: TypeError
+  - case:
+      id: error_indexerror_3
+      inputs:
+      - ab
+      - - - 0
+          - 5
+      raises: IndexError
+  - case:
+      id: error_indexerror_4
+      inputs:
+      - ''
+      - - - 0
+          - 1
+      raises: IndexError
+  - case:
+      id: error_typeerror_5
+      inputs:
+      - abc
+      - - null
+        - - 0
+          - 1
+      raises: TypeError
+  - case:
+      id: error_typeerror_6
+      inputs:
+      - abc
+      - - 1
+        - - 0
+          - 1
+      raises: TypeError
+  - case:
+      id: error_valueerror_7
+      inputs:
+      - ab
+      - - - 0
+      raises: ValueError
+  - case:
+      id: error_indexerror_8
+      inputs:
+      - A
+      - []
+      raises: IndexError
+  - case:
+      id: error_typeerror_9
+      inputs:
+      - abc
+      - - ab
+        - - 0
+          - 1
+      raises: TypeError

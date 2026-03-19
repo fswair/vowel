@@ -144,6 +144,21 @@ class TestAssertionEvaluator:
 
         assert summary.all_passed
 
+    def test_assertion_raw_fallback_preserves_compatibility(self):
+        """Assertions outside the restricted builtins set should still work via fallback."""
+        spec = {
+            "identity": {
+                "evals": {"Assertion": {"assertion": "pow(output, 2) == 16"}},
+                "dataset": [
+                    {"case": {"input": 4}},
+                ],
+            }
+        }
+
+        summary = RunEvals.from_dict(spec).with_functions({"identity": lambda x: x}).run()
+
+        assert summary.all_passed
+
 
 class TestTypeEvaluator:
     """Tests for type checking evaluator."""

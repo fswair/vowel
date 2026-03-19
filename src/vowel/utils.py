@@ -1,23 +1,4 @@
-"""Utility functions for the vowel evaluation framework.
-
-This module provides core utilities for:
-- Loading and parsing YAML evaluation specifications
-- Type compatibility checking for YAML serialization
-- Function import and execution helpers
-- Dataset creation and evaluation running
-- Result aggregation and reporting
-
-Key classes:
-    EvalResult: Result of a single function evaluation
-    EvalSummary: Aggregated results from multiple evaluations
-
-Key functions:
-    run_evals: Main entry point for running evaluations
-    load_evals: Load evaluations from various sources
-    to_dataset: Convert Evals to pydantic-evals Dataset
-    is_yaml_serializable_type: Check if a type can be serialized to YAML
-    check_compatibility: Validate function parameters for YAML compatibility
-"""
+"""Shared utilities for loading specs, building datasets, and running evals."""
 
 import asyncio
 import builtins
@@ -26,18 +7,19 @@ import contextlib
 import importlib
 import importlib.util
 import inspect
-import logging
 import os
 import sys
+import threading
 import types
 from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
-from functools import wraps
+from functools import lru_cache, wraps
 from pathlib import Path, PurePath
 from typing import Any, Literal, Optional, Union, get_args, get_origin
 
 import click
+import logfire
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_ai import format_as_xml
@@ -46,7 +28,7 @@ from pydantic_evals.evaluators import Contains, EqualsExpected, Evaluator, MaxDu
 from pydantic_evals.reporting import EvaluationReport
 
 from .errors import FixturePathError, SignatureError
-from .eval_types import Evals, EvalsFile, FixtureDefinition
+from .eval_types import Evals, EvalsFile, FixtureDefinition, SerializerSpec
 from .evals import (
     AssertionEvaluator,
     ContainsInputEvaluator,
@@ -55,11 +37,9 @@ from .evals import (
     TypeAdapterEvaluator,
     create_llm_judge,
 )
+from .executor import Executor
 
-logger = logging.getLogger(__name__)
-
-_SYS_PATH_MODIFIED = False
-
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 # =============================================================================
 # Evals Bundle - Container for evals and fixtures
@@ -71,8 +51,51 @@ class EvalsBundle(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    evals: dict[str, Evals] = Field(default_factory=dict)
+    evals: dict[str, Evals] = Field(min_length=1)
     fixtures: dict[str, FixtureDefinition] = Field(default_factory=dict)
+    serializers: dict[str, SerializerSpec] = Field(default_factory=dict)
+
+    def to_yaml(self) -> str:
+        """Serialize bundle to current vowel YAML spec format."""
+        data: dict[str, Any] = {}
+
+        for func_id, evals in self.evals.items():
+            evals_dict = evals.model_dump(
+                mode="python",
+                exclude_none=True,
+                exclude_defaults=True,
+            )
+            # Function id is represented by the top-level YAML key.
+            evals_dict.pop("id", None)
+            data[func_id] = evals_dict
+
+        if self.fixtures:
+            data["fixtures"] = {
+                name: definition.model_dump(
+                    mode="python",
+                    exclude_none=True,
+                    exclude_defaults=True,
+                )
+                for name, definition in self.fixtures.items()
+            }
+
+        if self.serializers:
+            data["serializers"] = {
+                name: serializer.model_dump(
+                    mode="python",
+                    by_alias=True,
+                    exclude_none=True,
+                    exclude_defaults=True,
+                )
+                for name, serializer in self.serializers.items()
+            }
+
+        return yaml.safe_dump(
+            data,
+            sort_keys=False,
+            allow_unicode=True,
+            default_flow_style=False,
+        )
 
 
 # =============================================================================
@@ -119,6 +142,24 @@ YAML_SERIALIZABLE_ORIGINS = {
     Mapping,
     Literal,
 }
+
+
+def _resolve_env_ref(
+    value: str, *, field_name: str, scope: Literal["judge", "model"] | str = "judge"
+) -> str:
+    """Resolve $ENV_VAR references used in YAML evaluator settings."""
+    value = value.strip()
+    if not value.startswith("$"):
+        return value
+
+    env_var = value.lstrip("$")
+    resolved = os.getenv(env_var)
+    if not resolved:
+        raise ValueError(
+            f"Environment variable {env_var} is not set for {scope} {field_name}, "
+            f"set {env_var} to a valid value."
+        )
+    return resolved
 
 
 def is_yaml_serializable_type(type_hint: Any) -> bool:
@@ -336,14 +377,27 @@ def check_compatibility(func: Callable) -> tuple[bool, list[str]]:
     return False, issues
 
 
-def _ensure_cwd_in_path() -> None:
-    """Ensure current working directory is in sys.path (run once)."""
-    global _SYS_PATH_MODIFIED
-    if not _SYS_PATH_MODIFIED:
-        cwd = os.getcwd()
-        if cwd not in sys.path:
-            sys.path.insert(0, cwd)
-        _SYS_PATH_MODIFIED = True
+@contextlib.contextmanager
+def _cwd_on_syspath() -> Any:
+    """Temporarily prepend cwd and project root to ``sys.path``."""
+    cwd = os.getcwd()
+    candidates = [cwd, str(PROJECT_ROOT)]
+    inserted: list[str] = []
+    for candidate in candidates:
+        if candidate not in sys.path:
+            sys.path.insert(0, candidate)
+            inserted.append(candidate)
+    try:
+        yield
+    finally:
+        for candidate in inserted:
+            with contextlib.suppress(ValueError):
+                sys.path.remove(candidate)
+
+
+def _is_yaml_source_string(source_str: str) -> bool:
+    """Best-effort heuristic for distinguishing inline YAML from file paths."""
+    return "\n" in source_str or source_str.strip().startswith("{") or ":" in source_str
 
 
 def _apply_serializer(
@@ -594,9 +648,9 @@ class FixtureManager:
     ):
         self.definitions = fixtures
         self._fixture_funcs = fixture_funcs or {}
-        self._instances: dict[str, Any] = {}  # Cached fixture instances (all scopes)
-        self._scope_counts: dict[str, int] = {}  # Reference counts for scoped fixtures
+        self._instances: dict[str, Any] = {}  # Cached fixture instances
         self._generators: dict[str, Any] = {}  # Active generator fixtures for cleanup
+        self._lock = threading.RLock()
 
     def setup(self, fixture_name: str) -> Any:
         """
@@ -615,19 +669,19 @@ class FixtureManager:
                 f"Available fixtures: {available if available else '(none defined)'}"
             )
 
-        defn = self.definitions[fixture_name]
+        with self._lock:
+            defn = self.definitions[fixture_name]
 
-        # For module/session scope, return cached instance if exists
-        if defn.scope in ("module", "session") and fixture_name in self._instances:
-            self._scope_counts[fixture_name] = self._scope_counts.get(fixture_name, 0) + 1
-            return self._instances[fixture_name]
+            # For module/session scope, return cached instance if exists.
+            if defn.scope in ("module", "session") and fixture_name in self._instances:
+                return self._instances[fixture_name]
 
-        # Class-based fixture
-        if defn.cls:
-            return self._setup_class_fixture(fixture_name, defn)
+            # Class-based fixture
+            if defn.cls:
+                return self._setup_class_fixture(fixture_name, defn)
 
-        # Function-based fixture
-        return self._setup_function_fixture(fixture_name, defn)
+            # Function-based fixture
+            return self._setup_function_fixture(fixture_name, defn)
 
     def _setup_class_fixture(self, fixture_name: str, defn: FixtureDefinition) -> Any:
         """Setup a class-based fixture by instantiating the class."""
@@ -646,9 +700,7 @@ class FixtureManager:
         except Exception as e:
             raise RuntimeError(f"Failed to instantiate {defn.cls}: {e}") from e
 
-        # Cache instance
         self._instances[fixture_name] = instance
-        self._scope_counts[fixture_name] = self._scope_counts.get(fixture_name, 0) + 1
 
         return instance
 
@@ -684,9 +736,7 @@ class FixtureManager:
         except Exception as e:
             raise RuntimeError(f"Failed to setup fixture '{fixture_name}': {e}") from e
 
-        # Cache instance (all scopes - function scope will be cleared on teardown)
         self._instances[fixture_name] = instance
-        self._scope_counts[fixture_name] = self._scope_counts.get(fixture_name, 0) + 1
 
         return instance
 
@@ -701,22 +751,17 @@ class FixtureManager:
         if fixture_name not in self.definitions:
             return
 
-        defn = self.definitions[fixture_name]
+        with self._lock:
+            defn = self.definitions[fixture_name]
 
-        # Only teardown if scope matches
-        if defn.scope != scope_trigger:
-            return
+            # Only teardown if scope matches
+            if defn.scope != scope_trigger:
+                return
 
-        # Decrement reference count
-        if fixture_name in self._scope_counts:
-            self._scope_counts[fixture_name] -= 1
-            # For module/session scope, only teardown when count reaches 0
-            if defn.scope in ("module", "session") and self._scope_counts[fixture_name] > 0:
-                return  # Still in use
+            instance = self._instances.pop(fixture_name, None)
+            if instance is None:
+                return
 
-        # Perform teardown
-        instance = self._instances.pop(fixture_name, None)
-        if instance is not None:
             # Check if this is a generator fixture (pytest-style yield)
             gen = self._generators.pop(fixture_name, None)
             if gen is not None:
@@ -731,7 +776,7 @@ class FixtureManager:
                 _, teardown_func = self._fixture_funcs[fixture_name]
             elif defn.teardown:
                 # Check if teardown is a class method (e.g., 'Connection.close')
-                if "." in defn.teardown and defn.cls:
+                if "." in defn.teardown and defn.cls and instance is not None:
                     parts = defn.teardown.split(".")
                     if len(parts) == 2:
                         class_name, method_name = parts
@@ -801,7 +846,6 @@ def import_function(module_path: str) -> Any:
         ImportError: If the module cannot be imported
         AttributeError: If the function is not found in the module
     """
-    _ensure_cwd_in_path()
     tried_combinations = []
 
     if "." not in module_path:
@@ -815,39 +859,54 @@ def import_function(module_path: str) -> Any:
 
     parts = module_path.split(".")
 
-    for i in range(len(parts) - 1, 0, -1):
-        module_name = ".".join(parts[:i])
-        remaining_parts = parts[i:]
-        tried_combinations.append(f"module='{module_name}', attr='{'.'.join(remaining_parts)}'")
+    with _cwd_on_syspath():
+        for i in range(len(parts) - 1, 0, -1):
+            module_name = ".".join(parts[:i])
+            remaining_parts = parts[i:]
+            tried_combinations.append(f"module='{module_name}', attr='{'.'.join(remaining_parts)}'")
 
-        module = None
+            module = None
 
-        try:
-            module = importlib.import_module(module_name)
-        except ImportError as e:
-            logger.debug(f"Standard import failed for '{module_name}': {e}")
-            relative_path = module_name.replace(".", os.sep) + ".py"
-            file_path = os.path.join(os.getcwd(), relative_path)
-
-            if os.path.exists(file_path):
-                try:
-                    spec = importlib.util.spec_from_file_location(module_name, file_path)
-                    if spec and spec.loader:
-                        module = importlib.util.module_from_spec(spec)
-                        spec.loader.exec_module(module)
-                        logger.debug(f"File-based import succeeded for '{file_path}'")
-                except Exception as e:
-                    logger.debug(f"File-based import failed for '{file_path}': {e}")
-
-        if module:
             try:
-                obj: Any = module
-                for part in remaining_parts:
-                    obj = getattr(obj, part)
-                return obj
-            except AttributeError as e:
-                logger.debug(f"Attribute lookup failed: {e}")
-                continue
+                module = importlib.import_module(module_name)
+            except ImportError as e:
+                logfire.debug(
+                    "Standard import failed for '{module_name}': {error}",
+                    module_name=module_name,
+                    error=str(e),
+                )
+                relative_path = module_name.replace(".", os.sep) + ".py"
+                candidate_roots = [os.getcwd(), str(PROJECT_ROOT)]
+
+                for root in candidate_roots:
+                    file_path = os.path.join(root, relative_path)
+                    if not os.path.exists(file_path):
+                        continue
+                    try:
+                        spec = importlib.util.spec_from_file_location(module_name, file_path)
+                        if spec and spec.loader:
+                            module = importlib.util.module_from_spec(spec)
+                            spec.loader.exec_module(module)
+                            logfire.debug(
+                                "File-based import succeeded for '{file_path}'", file_path=file_path
+                            )
+                            break
+                    except Exception as e:
+                        logfire.debug(
+                            "File-based import failed for '{file_path}': {error}",
+                            file_path=file_path,
+                            error=str(e),
+                        )
+
+            if module:
+                try:
+                    obj: Any = module
+                    for part in remaining_parts:
+                        obj = getattr(obj, part)
+                    return obj
+                except AttributeError as e:
+                    logfire.debug("Attribute lookup failed: {error}", error=str(e))
+                    continue
 
     try:
         obj = getattr(builtins, parts[0])
@@ -860,6 +919,46 @@ def import_function(module_path: str) -> Any:
     raise ImportError(
         f"Cannot import '{module_path}'. Tried combinations:\n"
         + "\n".join(f"  - {c}" for c in tried_combinations)
+    )
+
+
+@lru_cache(maxsize=512)
+def _import_path_cached(path: str) -> Any:
+    """Import and cache objects referenced by import paths."""
+    return import_function(path)
+
+
+def _resolve_yaml_serializer_entry(
+    serializers: Mapping[str, SerializerSpec],
+    serializer_name: str,
+) -> tuple[type | Callable | dict[str, type | Callable] | None, Callable[[dict], Any] | None]:
+    """Resolve a serializer registry entry into schema or serial_fn mapping values."""
+    if serializer_name not in serializers:
+        available = sorted(serializers.keys())
+        raise ValueError(
+            f"Unknown serializer '{serializer_name}'. Available serializers: {available}"
+        )
+
+    spec = serializers[serializer_name]
+
+    if spec.serializer is not None:
+        loaded = _import_path_cached(spec.serializer)
+        if not callable(loaded):
+            raise TypeError(f"Serializer '{spec.serializer}' must resolve to a callable")
+        return None, loaded
+
+    schema = spec.serializer_schema
+    if isinstance(schema, str):
+        return _import_path_cached(schema), None
+
+    if isinstance(schema, dict):
+        resolved: dict[str, type | Callable] = {}
+        for key, path in schema.items():
+            resolved[key] = _import_path_cached(path)
+        return resolved, None
+
+    raise ValueError(
+        f"Serializer '{serializer_name}' must define one of: schema (str|dict) or serializer"
     )
 
 
@@ -877,8 +976,6 @@ def import_class(class_path: str) -> type:
         ImportError: If the module cannot be imported
         AttributeError: If the class is not found in the module
     """
-    _ensure_cwd_in_path()
-
     parts = class_path.split(".")
     if len(parts) < 2 or any(not p for p in parts):
         raise ImportError(f"Invalid class path '{class_path}'. Expected format 'module.ClassName'.")
@@ -887,7 +984,8 @@ def import_class(class_path: str) -> type:
     class_name = parts[-1]
 
     try:
-        module = importlib.import_module(module_name)
+        with _cwd_on_syspath():
+            module = importlib.import_module(module_name)
     except ImportError as e:
         raise ImportError(f"Cannot import module '{module_name}': {e}") from e
 
@@ -902,50 +1000,6 @@ def import_class(class_path: str) -> type:
     return cls
 
 
-def load_evals_file(yaml_path: str) -> dict[str, Evals]:
-    with open(yaml_path) as f:
-        loaded = yaml.safe_load(f)
-
-    evals_file = EvalsFile.model_validate(loaded)
-    return evals_file.get_evals()
-
-
-def load_evals_from_yaml_string(yaml_content: str) -> dict[str, Evals]:
-    loaded = yaml.safe_load(yaml_content)
-    evals_file = EvalsFile.model_validate(loaded)
-    return evals_file.get_evals()
-
-
-def load_evals_from_dict(data: dict) -> dict[str, Evals]:
-    evals_file = EvalsFile.model_validate(data)
-    return evals_file.get_evals()
-
-
-def load_evals_from_object(evals_obj: EvalsFile) -> dict[str, Evals]:
-    return evals_obj.get_evals()
-
-
-def load_evals(source: str | Path | dict | EvalsFile) -> dict[str, Evals]:
-    if isinstance(source, EvalsFile):
-        return load_evals_from_object(source)
-    elif isinstance(source, dict):
-        return load_evals_from_dict(source)
-    elif isinstance(source, (str, Path)):
-        source_str = str(source)
-        # Check if it's an existing file path first, before YAML heuristics
-        if os.path.exists(source_str):
-            return load_evals_file(source_str)
-        if "\n" in source_str or source_str.strip().startswith("{") or ":" in source_str:
-            return load_evals_from_yaml_string(source_str)
-        else:
-            return load_evals_file(source_str)
-    else:
-        raise TypeError(
-            f"source must be a file path (str/Path), YAML string (str), dict, "
-            f"or EvalsFile object, got {type(source)}"
-        )
-
-
 # =============================================================================
 # Bundle Loading Functions (with fixtures)
 # =============================================================================
@@ -957,26 +1011,42 @@ def load_bundle_file(yaml_path: str) -> EvalsBundle:
         loaded = yaml.safe_load(f)
 
     evals_file = EvalsFile.model_validate(loaded)
-    return EvalsBundle(evals=evals_file.get_evals(), fixtures=evals_file.fixtures)
+    return EvalsBundle(
+        evals=evals_file.get_evals(),
+        fixtures=evals_file.fixtures,
+        serializers=evals_file.serializers,
+    )
 
 
 def load_bundle_from_yaml_string(yaml_content: str) -> EvalsBundle:
     """Load evals and fixtures from a YAML string."""
     loaded = yaml.safe_load(yaml_content)
     evals_file = EvalsFile.model_validate(loaded)
-    return EvalsBundle(evals=evals_file.get_evals(), fixtures=evals_file.fixtures)
+    return EvalsBundle(
+        evals=evals_file.get_evals(),
+        fixtures=evals_file.fixtures,
+        serializers=evals_file.serializers,
+    )
 
 
 def load_bundle_from_dict(data: dict) -> EvalsBundle:
     """Load evals and fixtures from a dictionary."""
     evals_file = EvalsFile.model_validate(data)
-    return EvalsBundle(evals=evals_file.get_evals(), fixtures=evals_file.fixtures)
+    return EvalsBundle(
+        evals=evals_file.get_evals(),
+        fixtures=evals_file.fixtures,
+        serializers=evals_file.serializers,
+    )
 
 
 def load_bundle_from_object(evals_obj: EvalsFile) -> EvalsBundle:
     """Load evals and fixtures from an EvalsFile object."""
     assert isinstance(evals_obj, EvalsFile)
-    return EvalsBundle(evals=evals_obj.get_evals(), fixtures=evals_obj.fixtures)
+    return EvalsBundle(
+        evals=evals_obj.get_evals(),
+        fixtures=evals_obj.fixtures,
+        serializers=evals_obj.serializers,
+    )
 
 
 def load_bundle(source: str | Path | dict | EvalsFile) -> EvalsBundle:
@@ -995,7 +1065,9 @@ def load_bundle(source: str | Path | dict | EvalsFile) -> EvalsBundle:
         return load_bundle_from_dict(source)
     elif isinstance(source, (str, Path)):
         source_str = str(source)
-        if "\n" in source_str or source_str.strip().startswith("{") or ":" in source_str:
+        if os.path.exists(source_str):
+            return load_bundle_file(source_str)
+        if _is_yaml_source_string(source_str):
             return load_bundle_from_yaml_string(source_str)
         else:
             return load_bundle_file(source_str)
@@ -1123,11 +1195,11 @@ def to_dataset(
             display_input = f"inputs: {match_case.inputs}"
             input_value = {"inputs": match_case.inputs}
         else:
-            display_input = f"input: {match_case.input}"
+            display_input = f"input: {str(match_case.input)[:300]}"
             input_value = {"input": match_case.input}
 
         if any(case for case in dataset_cases if input_value == case.inputs):
-            logger.warning("Already exists in dataset, skipping duplicate case.")
+            logfire.warn("Already exists in dataset, skipping duplicate case.")
             continue
 
         dataset_cases.append(
@@ -1248,6 +1320,42 @@ def _merge_programmatic_fixtures(
     return merged_fixtures, fixture_funcs
 
 
+def _resolve_eval_id_mapping(
+    mapping: Mapping[str, Any] | None,
+    eval_id: str,
+    *,
+    mapping_name: str,
+) -> Any | None:
+    """Resolve mapping entries by exact id first, then by short function name.
+
+    Supports using programmatic keys like ``{"func": fn}`` for specs that use
+    ``module.func`` eval ids.
+    """
+    if not mapping:
+        return None
+
+    if eval_id in mapping:
+        return mapping[eval_id]
+
+    short_name = eval_id.rsplit(".", 1)[-1]
+    if short_name in mapping:
+        return mapping[short_name]
+
+    # Reverse direction: when eval id is bare and mapping uses module.function.
+    if "." not in eval_id:
+        matches = [value for key, value in mapping.items() if key.rsplit(".", 1)[-1] == eval_id]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            candidates = sorted({key for key in mapping if key.rsplit(".", 1)[-1] == eval_id})
+            raise ValueError(
+                f"Ambiguous {mapping_name} mapping for '{eval_id}'. "
+                f"Provide an exact key. Candidates: {candidates}"
+            )
+
+    return None
+
+
 def _import_and_detect_class_method(
     eval_id: str,
     functions: dict[str, Callable] | None,
@@ -1261,8 +1369,9 @@ def _import_and_detect_class_method(
         - class_path: Full module.ClassName path for class methods, None otherwise
         - class_name: Class name for class methods, None otherwise
     """
-    if functions and eval_id in functions:
-        func = functions[eval_id]
+    resolved_func = _resolve_eval_id_mapping(functions, eval_id, mapping_name="function")
+    if resolved_func is not None:
+        func = resolved_func
         # Check if bound method (exclude builtin functions where __self__ is the module)
         self_obj = getattr(func, "__self__", None)
         if self_obj is not None and not isinstance(self_obj, types.ModuleType):
@@ -1514,8 +1623,21 @@ def _evaluate_single_function(
         )
 
         # Get serializers for this function if defined
-        func_schema = schema.get(eval_id)
-        func_serial_fn = serial_fn.get(eval_id)
+        func_schema = _resolve_eval_id_mapping(schema, eval_id, mapping_name="serializer schema")
+        func_serial_fn = _resolve_eval_id_mapping(
+            serial_fn, eval_id, mapping_name="serializer function"
+        )
+
+        for evaluator in dataset.evaluators:
+            if isinstance(evaluator, AssertionEvaluator):
+                evaluator.serializer = func_schema
+                evaluator.serializer_fn = func_serial_fn
+
+        for case in dataset.cases:
+            for evaluator in case.evaluators:
+                if isinstance(evaluator, AssertionEvaluator):
+                    evaluator.serializer = func_schema
+                    evaluator.serializer_fn = func_serial_fn
 
         # Setup module-scoped fixtures for this eval
         module_fixtures = {}
@@ -1975,7 +2097,7 @@ class EvalSummary(BaseModel):
 
 
 def run_evals(
-    source: str | Path | dict | EvalsFile,
+    source: str | Path | dict | EvalsFile | EvalsBundle,
     *,
     filter_funcs: list[str] | None = None,
     functions: dict[str, Callable] | None = None,
@@ -1986,6 +2108,8 @@ def run_evals(
         dict[str, Callable | tuple[Callable, Callable | None] | FixtureDefinition] | None
     ) = None,
     ignore_duration: bool = False,
+    executor: Executor | None = None,
+    fallback_executor: Executor | None = None,
 ) -> EvalSummary:
     """
     Run evaluations from various sources.
@@ -1999,14 +2123,18 @@ def run_evals(
         serial_fn: Optional dict of serializer functions (receive full input dict)
         fixtures: Optional dict of fixture functions {name: setup_fn} or {name: (setup_fn, teardown_fn)}
         ignore_duration: If True, skip duration constraints
+        executor: Optional primary executor configuration for execution-aware subflows
+        fallback_executor: Optional fallback executor paired with ``executor``
 
     Returns:
         EvalSummary with aggregated results
     """
     # Load both evals and fixtures from YAML
-    bundle = load_bundle(source)
+    _ = (executor, fallback_executor)
+    bundle = source if isinstance(source, EvalsBundle) else load_bundle(source)
     all_evals = bundle.evals
     yaml_fixtures = bundle.fixtures
+    yaml_serializers = bundle.serializers
 
     # Merge programmatic fixtures with YAML fixtures
     merged_fixtures, fixture_funcs = _merge_programmatic_fixtures(yaml_fixtures, fixtures)
@@ -2018,13 +2146,37 @@ def run_evals(
     serial_fn = serial_fn or {}
 
     if filter_funcs:
-        filtered_evals = {k: v for k, v in all_evals.items() if k in filter_funcs}
+        resolved_filter_ids: list[str] = []
+
+        for raw_filter in filter_funcs:
+            if raw_filter in all_evals:
+                resolved_filter_ids.append(raw_filter)
+                continue
+
+            short_name = raw_filter.rsplit(".", 1)[-1]
+            matches = [
+                eval_id for eval_id in all_evals if eval_id.rsplit(".", 1)[-1] == short_name
+            ]
+
+            if len(matches) == 1:
+                resolved_filter_ids.append(matches[0])
+            elif len(matches) > 1:
+                candidates = sorted(matches)
+                raise ValueError(
+                    f"Ambiguous filter '{raw_filter}'. Provide an exact eval id. "
+                    f"Candidates: {candidates}"
+                )
+        # Keep stable input order while removing duplicates.
+        ordered_unique_filter_ids = list(dict.fromkeys(resolved_filter_ids))
+        filtered_evals = {k: v for k, v in all_evals.items() if k in ordered_unique_filter_ids}
+
         if not filtered_evals:
             available = list(all_evals.keys())
             raise ValueError(
                 f"No functions found matching filters: {', '.join(filter_funcs)}. "
                 f"Available: {', '.join(available)}"
             )
+
         all_evals = filtered_evals
 
     # Create fixture manager if fixtures are defined
@@ -2035,14 +2187,43 @@ def run_evals(
     try:
         for eval_id, evals in all_evals.items():
             try:
+                effective_schema = dict(schema)
+                effective_serial_fn = dict(serial_fn)
+
+                # YAML-native serializer registry (per-eval reference).
+                if evals.serializer:
+                    yaml_schema, yaml_serial = _resolve_yaml_serializer_entry(
+                        yaml_serializers,
+                        evals.serializer,
+                    )
+
+                    # Programmatic mappings have precedence.
+                    has_programmatic_schema = (
+                        _resolve_eval_id_mapping(schema, eval_id, mapping_name="serializer schema")
+                        is not None
+                    )
+                    has_programmatic_serial = (
+                        _resolve_eval_id_mapping(
+                            serial_fn,
+                            eval_id,
+                            mapping_name="serializer function",
+                        )
+                        is not None
+                    )
+
+                    if yaml_schema is not None and not has_programmatic_schema:
+                        effective_schema[eval_id] = yaml_schema
+                    if yaml_serial is not None and not has_programmatic_serial:
+                        effective_serial_fn[eval_id] = yaml_serial
+
                 result = _evaluate_single_function(
                     eval_id,
                     evals,
                     functions,
                     merged_fixtures,
                     fixture_manager,
-                    schema,
-                    serial_fn,
+                    effective_schema,
+                    effective_serial_fn,
                     ignore_duration,
                 )
                 results.append(result)

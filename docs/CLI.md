@@ -74,4 +74,45 @@ vowel evals.yml -v --hide-report
 
 # Hide report without verbose (still shows Overall Summary panel)
 vowel evals.yml --hide-report
+
+# Validate YAML + refresh schema header
+vowel schema evals.yml
+
+# Generate schema JSON file (default: vowel-schema.json)
+vowel schema --create
+
+# Generate schema JSON at a custom path
+vowel schema --create ./schemas/vowel-schema.json
+
+# Show tracked model costs
+vowel costs --list
+vowel costs --by-generation
+vowel costs --by-run
+vowel costs --generation <generation_id>
+vowel costs --run <run_id>
 ```
+
+---
+
+## Schema Commands
+
+Use schema commands to validate specs and keep YAML schema headers in sync.
+
+| Command | Description |
+|--------|-------------|
+| `vowel schema <file>` | Validates YAML and updates the file's schema header safely |
+| `vowel schema --create [path]` | Generates `vowel-schema.json` (or writes to custom path) |
+
+---
+
+## Cost Commands
+
+Use cost commands to inspect generation and run cost history.
+
+| Command | Description |
+|--------|-------------|
+| `vowel costs --list` | List all tracked generations and runs |
+| `vowel costs --by-generation` | Aggregate totals by generation id |
+| `vowel costs --by-run` | Aggregate totals by run id |
+| `vowel costs --generation <id>` | Show detailed rows for one generation |
+| `vowel costs --run <id>` | Show detailed rows for one run |

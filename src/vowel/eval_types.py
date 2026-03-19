@@ -1,34 +1,12 @@
-"""Pydantic models for vowel evaluation specifications.
+"""Pydantic models for parsing and validating vowel YAML specifications."""
 
-This module defines the data models used to parse and validate
-YAML evaluation specifications. These models ensure type safety
-and provide clear schemas for evaluation definitions.
-
-Main evaluation types:
-    IsInstanceCase: Type checking validation
-    AssertionCase: Custom Python assertion evaluation
-    DurationCase: Performance/timing validation
-    ContainsInputCase: Input containment check
-    PatternMatchCase: Regex pattern matching
-    RaisesCase: Exception validation
-    LLMJudgeCase: LLM-based semantic evaluation
-
-Container models:
-    MatchCase: Individual test case with input/expected output
-    DatasetCase: Wrapper for test cases in dataset
-    Evals: Complete evaluation specification for a function
-    EvalsFile: Root model for YAML file parsing
-"""
-
-import logging
 import os
+import typing
 from typing import Any, Literal
 
+import logfire
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.experimental.missing_sentinel import MISSING
-
-logger = logging.getLogger(__name__)
-
 
 # =============================================================================
 # LLM Output Models
@@ -108,6 +86,63 @@ _EXAMPLE_GET_CLOSE_MATCHES = """get_close_matches:
         assertion: "len(output) == 2"
 """
 
+SAFE_ASSERTION_BUILTINS = {
+    "abs": abs,
+    "all": all,
+    "any": any,
+    "bool": bool,
+    "dict": dict,
+    "enumerate": enumerate,
+    "float": float,
+    "int": int,
+    "isinstance": isinstance,
+    "len": len,
+    "list": list,
+    "max": max,
+    "min": min,
+    "range": range,
+    "round": round,
+    "set": set,
+    "sorted": sorted,
+    "str": str,
+    "sum": sum,
+    "tuple": tuple,
+    "type": type,
+    "zip": zip,
+}
+
+SAFE_TYPE_NAMES: dict[str, Any] = {
+    "Any": Any,
+    "None": None,
+    "bool": bool,
+    "bytes": bytes,
+    "dict": dict,
+    "float": float,
+    "frozenset": frozenset,
+    "int": int,
+    "list": list,
+    "object": object,
+    "set": set,
+    "str": str,
+    "tuple": tuple,
+    "typing": typing,
+}
+SAFE_TYPE_NAMES.update(
+    {name: getattr(typing, name) for name in dir(typing) if not name.startswith("_")}
+)
+
+
+def _eval_assertion_restricted(assertion: str, env: dict[str, Any]) -> bool:
+    namespace = {"__builtins__": SAFE_ASSERTION_BUILTINS}
+    namespace.update(env)
+    return bool(eval(assertion, namespace, namespace))
+
+
+def _eval_type_restricted(type_expr: str) -> Any:
+    namespace = {"__builtins__": {}}
+    namespace.update(SAFE_TYPE_NAMES)
+    return eval(type_expr, namespace, namespace)
+
 
 class EvalsSource(BaseModel):
     """LLM output model for YAML eval specification."""
@@ -126,13 +161,31 @@ class EvalsSource(BaseModel):
 # Fixture Models
 # =============================================================================
 
-FixtureScope = Literal["function", "module", "session"]
-"""Scope for fixture lifecycle.
+FixtureScope = Literal["case", "eval", "file", "function", "module", "session"]
+"""Supported fixture scope names.
 
-- function: Setup/teardown for each test case (default)
-- module: Setup once per eval file, teardown after all cases
-- session: Setup once per run_evals call, teardown at end
+Canonical user-facing names:
+- case: per dataset case
+- eval: per function eval block
+- file: per YAML file / run invocation
+
+Compatibility aliases:
+- function -> case
+- module -> eval
+- session -> file
+
+Note:
+Runtime lifecycle currently uses legacy internal values
+(`function`/`module`/`session`). New names are normalized to these
+internal values for behavior-preserving migration.
 """
+
+
+_FIXTURE_SCOPE_ALIASES: dict[str, str] = {
+    "case": "function",
+    "eval": "module",
+    "file": "session",
+}
 
 
 class FixtureDefinition(BaseModel):
@@ -163,8 +216,21 @@ class FixtureDefinition(BaseModel):
     )
     scope: FixtureScope = Field(
         default="function",
-        description="Lifecycle scope: 'function' (per case), 'module' (per eval), or 'session' (per run)",
+        description=(
+            "Fixture lifecycle scope. Preferred names: 'case', 'eval', 'file'. "
+            "Compatibility aliases are accepted: 'function', 'module', 'session'. "
+            "Current runtime normalization maps case->function, eval->module, file->session."
+        ),
     )
+
+    @field_validator("scope", mode="before")
+    @classmethod
+    def normalize_scope_aliases(cls, value: Any) -> Any:
+        """Normalize new scope names to legacy internal values."""
+        if value is None or not isinstance(value, str):
+            return value
+        normalized = value.strip().lower()
+        return _FIXTURE_SCOPE_ALIASES.get(normalized, normalized)
 
     @model_validator(mode="after")
     def validate_setup_or_cls(self):
@@ -181,6 +247,36 @@ class FixturesConfig(BaseModel):
     fixtures: dict[str, FixtureDefinition] = Field(
         default_factory=dict, description="Map of fixture names to their definitions"
     )
+
+
+class SerializerSpec(BaseModel):
+    """Serializer registry entry for YAML-native serializer configuration."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    serializer_schema: str | dict[str, str] | None = Field(
+        default=None,
+        alias="schema",
+        serialization_alias="schema",
+        description=(
+            "Schema converter path(s). Use a single import path string for direct mode, "
+            "or a mapping of parameter name to import path for nested mode."
+        ),
+    )
+    serializer: str | None = Field(
+        default=None,
+        description="Import path to custom serializer function (serial_fn mode).",
+    )
+
+    @model_validator(mode="after")
+    def validate_one_of(self):
+        has_schema = self.serializer_schema is not None
+        has_serializer = self.serializer is not None
+        if has_schema and has_serializer:
+            raise ValueError("Serializer spec cannot define both 'schema' and 'serializer'")
+        if not has_schema and not has_serializer:
+            raise ValueError("Serializer spec must define one of: 'schema' or 'serializer'")
+        return self
 
 
 # =============================================================================
@@ -205,7 +301,11 @@ class IsInstanceCase(BaseModel):
     )
 
     def evaluate(self, output: Any) -> bool:
-        return isinstance(output, eval(self.type))
+        try:
+            expected = _eval_type_restricted(self.type)
+        except Exception:
+            expected = eval(self.type)
+        return isinstance(output, expected)
 
 
 class AssertionCase(BaseModel):
@@ -260,7 +360,10 @@ class AssertionCase(BaseModel):
 
     def evaluate(self, input: Any, output: Any) -> bool:
         env = {"input": input, "output": output}
-        return eval(self.assertion, env, env)
+        try:
+            return _eval_assertion_restricted(self.assertion, env)
+        except Exception:
+            return bool(eval(self.assertion, env, env))
 
 
 class DurationCase(BaseModel):
@@ -664,6 +767,14 @@ class Evals(BaseModel):
         examples=[["db"], ["db", "cache"], ["redis"]],
     )
 
+    serializer: str | None = Field(
+        default=None,
+        description=(
+            "Optional serializer registry key from top-level 'serializers'. "
+            "When set, this eval uses that serializer definition."
+        ),
+    )
+
     evals: dict[
         str,
         IsInstanceCase
@@ -734,20 +845,32 @@ class EvalsFile(BaseModel):
         default_factory=dict,
         description="Global fixture definitions available to all evals in this file",
     )
+    serializers: dict[str, SerializerSpec] = Field(
+        default_factory=dict,
+        description="Global serializer definitions available to evals in this file",
+    )
 
     @classmethod
     def model_validate(cls, obj, **kwargs):
         # Parse fixtures if present (don't mutate caller's dict)
         fixtures_data = obj.get("fixtures", {})
-        obj = {k: v for k, v in obj.items() if k != "fixtures"}
+        serializers_data = obj.get("serializers", {})
+        obj = {k: v for k, v in obj.items() if k not in {"fixtures", "serializers"}}
         fixtures = {}
+        serializers = {}
         for name, defn in fixtures_data.items():
             if isinstance(defn, dict):
                 fixtures[name] = FixtureDefinition(**defn)
             elif isinstance(defn, FixtureDefinition):
                 fixtures[name] = defn
 
-        instance = cls.model_construct(fixtures=fixtures, **obj)
+        for name, defn in serializers_data.items():
+            if isinstance(defn, dict):
+                serializers[name] = SerializerSpec(**defn)
+            elif isinstance(defn, SerializerSpec):
+                serializers[name] = defn
+
+        instance = cls.model_construct(fixtures=fixtures, serializers=serializers, **obj)
         return instance
 
     # Pydantic internal attributes to skip when iterating
@@ -770,20 +893,21 @@ class EvalsFile(BaseModel):
             "model_dump",
             "model_dump_json",
             "fixtures",
+            "serializers",
             # Skip fixtures when iterating evals
         }
     )
 
     def get_evals(self) -> dict[str, Evals]:
         result = {}
-        extras = getattr(self, "__pydantic_extra__", None) or {}
+        extras = getattr(self, "__pydantic_extra__", {})
         for key, value in extras.items():
-            if key == "fixtures":
+            if key in {"fixtures", "serializers"}:
                 continue
             if isinstance(value, dict) and "dataset" in value:
                 try:
                     result[key] = Evals(id=key, **value)
                 except Exception as e:
-                    logger.warning(f"Failed to process eval '{key}': {e}")
+                    logfire.warn("Failed to process eval '{key}': {error}", key=key, error=str(e))
 
         return result

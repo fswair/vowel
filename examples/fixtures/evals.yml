@@ -12,9 +12,11 @@ write_and_count:
     - tmp
   dataset:
     - case:
+        id: write_count_hello_world
         input: "Hello World"
         expected: 11
     - case:
+        id: write_count_test
         input: "Test"
         expected: 4
 
@@ -23,9 +25,11 @@ count_users:
     - db
   dataset:
     - case:
+        id: count_users_alice
         input: "Alice"
         expected: 2
     - case:
+        id: count_users_bob
         input: "Bob"
         expected: 2
 
@@ -34,5 +38,6 @@ add_with_bonus:
     - config
   dataset:
     - case:
+        id: add_with_bonus_basic
         inputs: { a: 1, b: 2 }
         expected: 13

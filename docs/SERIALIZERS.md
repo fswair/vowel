@@ -58,6 +58,52 @@ summary = (
 )
 ```
 
+> Key matching note: If YAML eval ids use `module.function`, both programmatic maps accept either the exact id (`module.function`) or short name (`function`) keys in `.with_functions(...)`, `.with_serializer(...)`, and `serial_fn={...}`.
+
+> Assertion context note: When a serializer is active, assertion evaluators see the serialized `input` value (not raw YAML payload).
+>
+> - Schema mode: `input` is the model/callable output.
+> - Serial fn mode: `input` is whatever `serial_fn` returns (single value, tuple, or dict).
+> - Dict/nested schema mode: `input` contains per-parameter serialized values.
+
+---
+
+## YAML-Native Serializer Registry
+
+You can define serializers directly in YAML and reference them per eval.
+
+```yaml
+serializers:
+  query_schema:
+    schema: examples.serializers.util.Query
+  query_serial_fn:
+    serializer: examples.serializers.util.query_from_payload
+
+examples.serializers.util.query_users:
+  serializer: query_schema
+  dataset:
+    - case:
+        input:
+          sql: "SELECT name FROM users WHERE age > ?"
+          params: [30]
+
+examples.serializers.util.query_users_custom:
+  serializer: query_serial_fn
+  dataset:
+    - case:
+        input: "SELECT COUNT(*) AS total FROM users"
+```
+
+One-of rule for each serializer registry entry:
+- use `schema` or `serializer`
+- do not define both in the same entry
+
+Runnable example:
+
+```bash
+vowel examples/serializers/db_query_evals.yml
+```
+
 ---
 
 ## Advanced Examples
@@ -89,6 +135,9 @@ summary = (
     .with_serializer({"process": {"user": User, "config": Config}})
     .run()
 )
+
+# Assertions can access serialized nested values
+# assertion: "input['user'].email.endswith('@a.com') and input['config'].timeout == 30"
 ```
 
 ### Custom Parsing Logic

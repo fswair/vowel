@@ -3,9 +3,9 @@
     "prompt_preview": "generate_function",
     "model": "openrouter:google/gemini-3-flash-preview",
     "response": {
-      "name": "calculate_factorial",
-      "description": "Calculates the factorial of a non-negative integer n using an iterative approach. Includes input validation for non-integers and negative values.",
-      "code": "def calculate_factorial(n: int) -> int:\n    \\\"\\\"\\\"\n    Calculates the factorial of a non-negative integer n.\n    \n    Args:\n        n (int): A non-negative integer.\n        \n    Returns:\n        int: The factorial of n.\n        \n    Raises:\n        ValueError: If n is negative.\n        TypeError: If n is not an integer.\n    \\\"\\\"\\\"\n    if not isinstance(n, int):\n        raise TypeError(\\\"Input must be an integer.\\\")\n    if n < 0:\n        raise ValueError(\\\"Input must be a non-negative integer.\\\")\n    \n    result = 1\n    for i in range(2, n + 1):\n        result *= i\n    return result\n"
+      "name": "factorial",
+      "description": "Calculates the factorial of a non-negative integer using an iterative approach to avoid recursion depth issues.",
+      "code": "def factorial(n: int) -> int:\n    \\\"\\\"\\\"\n    Calculates the factorial of a non-negative integer n.\n    \n    Args:\n        n: A non-negative integer.\n        \n    Returns:\n        The factorial of n.\n        \n    Raises:\n        ValueError: If n is negative.\n        TypeError: If n is not an integer.\n    \\\"\\\"\\\"\n    if not isinstance(n, int):\n        raise TypeError(\\\"Input must be an integer.\\\")\n    if n < 0:\n        raise ValueError(\\\"Factorial is not defined for negative numbers.\\\")\n    \n    result = 1\n    for i in range(2, n + 1):\n        result *= i\n    return result\n"
     }
   }
 }

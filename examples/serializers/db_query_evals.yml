@@ -1,0 +1,53 @@
+# yaml-language-server: $schema=../../vowel-schema.json
+
+
+serializers:
+  query_schema:
+    schema: examples.serializers.util.Query
+  query_serial_fn:
+    serializer: examples.serializers.util.query_from_payload
+
+fixtures:
+  db:
+    cls: examples.serializers.util.DbConnection
+    kwargs:
+      db_path: ":memory:"
+    teardown: examples.serializers.util.DbConnection.close
+    scope: module
+
+examples.serializers.util.query_users:
+  fixture:
+    - db
+  serializer: query_schema
+  evals:
+    ReturnsRows:
+      type: list[dict[str, typing.Any]]
+    CheckSqlIsNotEmpty:
+      assertion: "input.sql is not None"
+  dataset:
+    - case:
+        id: by_age_threshold
+        input:
+          sql: "SELECT name FROM users WHERE age > ? ORDER BY age"
+          params: [30]
+        assertion: "output == [{'name': 'Bob'}, {'name': 'Cara'}]"
+    - case:
+        id: invalid_table_raises
+        input:
+          sql: "SELECT * FROM ghost_table"
+          params: []
+        raises: any
+
+examples.serializers.util.query_users_custom:
+  fixture:
+    - db
+  serializer: query_serial_fn
+  evals:
+    ReturnsRows:
+      type: list[dict[str, typing.Any]]
+  dataset:
+    - case:
+        id: count_users_from_text
+        input: "SELECT COUNT(*) AS total FROM users"
+        expected:
+          - {total: 3}

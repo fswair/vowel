@@ -1,25 +1,6 @@
-"""TDD-based eval generation: Intent -> Signature -> Evals -> Implementation.
+"""TDD pipeline for generating signatures, evals, and implementations."""
 
-This module provides a true TDD approach where:
-1. LLM generates function signature from description (intent)
-2. LLM generates eval spec from signature (tests first)
-3. LLM generates implementation that passes the evals (code last)
-
-Example:
-    from vowel.tdd import TDDGenerator
-
-    generator = TDDGenerator(model="openai:gpt-4o")
-
-    result = generator.generate_all(
-        description="Binary search for target in sorted list. Returns index or -1.",
-        name="binary_search"
-    )
-
-    print(result.signature.to_signature_str())
-    print(result.yaml_spec)
-    print(result.func.code)
-"""
-
+import inspect
 import os
 import re
 import time
@@ -31,13 +12,19 @@ import logfire
 import yaml
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
+from pydantic_ai.models import Model
 
 from vowel.context import EVAL_SPEC_CONTEXT
 from vowel.eval_types import EvalsSource
+from vowel.executor import Executor, resolve_executors
 from vowel.monitoring import enable_monitoring
 from vowel.runner import Function, RunEvals
 from vowel.utils import EvalSummary
-from vowel.validation import validate_and_fix_spec
+from vowel.validation import (
+    build_failure_context,
+    validate_and_fix_spec,
+    validate_expected_values,
+)
 
 # Configure logfire for tracing
 dotenv.load_dotenv()
@@ -218,9 +205,12 @@ class TDDGenerator:
 
     def __init__(
         self,
-        model: str | None = None,
+        model: str | Model | None = None,
         additional_context: str | list[str] | None = None,
         load_env: bool = False,
+        executor: Executor | None = None,
+        fallback_executor: Executor | None = None,
+        **opts,
     ):
         if load_env:
             import dotenv
@@ -245,6 +235,12 @@ class TDDGenerator:
         self._impl_agent: Any = None
         self._signature_agent: Any = None
 
+        # Optional executor for expected-value validation
+        self._executor = executor
+        self._fallback_executor = fallback_executor
+
+        self._opts = opts
+
         logfire.info("TDDGenerator initialized", model=self.model)
 
     @property
@@ -264,6 +260,7 @@ Guidelines:
 - Specify return type accurately
 - Write a clear, complete description
 """,
+                **self._opts,
             )
         return cast(Agent[None, FunctionSignature], self._signature_agent)
 
@@ -463,6 +460,7 @@ evals:
 
 For complex validations, use case-specific assertions instead.
 """,
+                **self._opts,
             )
         return cast(Agent[None, EvalsSource], self._eval_agent)
 
@@ -631,6 +629,7 @@ If ANY test case would fail, fix your implementation BEFORE returning.
 - [ ] For path parsing: handle both `key` and `[index]` formats
 - [ ] For nested access: check type at EACH level before accessing
 """,
+                **self._opts,
             )
         return cast(Agent[None, Function], self._impl_agent)
 
@@ -737,34 +736,79 @@ Requirements:
 IMPORTANT: In assertions, use `input[0]`, `input[1]` to access positional args.
 {extra_context}
 {f"<UserContext>{additional_context}</UserContext>" if additional_context else ""}"""
-                result = self.eval_agent.run_sync(prompt)
-                yaml_spec = result.output.yaml_spec  # type: ignore[attr-defined]
+                try:
+                    result = self.eval_agent.run_sync(prompt)
+                    yaml_spec = result.output.yaml_spec  # type: ignore[attr-defined]
 
-                # Sanitize: strip YAML tags that safe_load rejects
-                yaml_spec = re.sub(r"!!python/[\w.:]+", "", yaml_spec)
-                yaml_spec = re.sub(r"!!binary\b", "", yaml_spec)
+                    # Sanitize: strip YAML tags that safe_load rejects
+                    yaml_spec = re.sub(r"!!python/[\w.:]+", "", yaml_spec)
+                    yaml_spec = re.sub(r"!!binary\b", "", yaml_spec)
 
-                # Validate YAML syntax
-                yaml.safe_load(yaml_spec)
+                    # Validate YAML syntax
+                    yaml.safe_load(yaml_spec)
 
-                # Static validation: fix common LLM generation mistakes
-                validation = validate_and_fix_spec(yaml_spec)
-                if validation.has_warnings:
-                    logfire.info("Spec validation results", summary=validation.summary())
-                if validation.was_modified:
-                    yaml_spec = validation.fixed_yaml
+                    # Static validation: fix common LLM generation mistakes
+                    validation = validate_and_fix_spec(yaml_spec)
+                    if validation.has_warnings:
+                        logfire.info("Spec validation results", summary=validation.summary())
+                    if validation.was_modified:
+                        yaml_spec = validation.fixed_yaml
 
-                runner = RunEvals.from_source(yaml_spec)
-                logfire.info(
-                    "Evals generated", cases=len(yaml_spec.split("- case:")), attempt=attempt + 1
-                )
+                    # Executor-based validation: fix expected values by executing
+                    # each case through the sandbox and correcting mismatches.
+                    if func is not None:
+                        # Resolve source code for validation
+                        if isinstance(func, Function):
+                            real_code = func.code
+                        elif callable(func):
+                            try:
+                                real_code = inspect.getsource(func)
+                            except OSError:
+                                real_code = None
+                        else:
+                            real_code = None
+
+                        if real_code is not None:
+                            val_func = Function(
+                                name=signature.name,
+                                code=real_code,
+                                description=signature.description,
+                            )
+                            executor = resolve_executors(
+                                getattr(self, "_executor", None),
+                                getattr(self, "_fallback_executor", None),
+                            )
+                            yaml_spec = validate_expected_values(
+                                yaml_spec,
+                                val_func,
+                                executor,
+                            )
+
+                    runner = RunEvals.from_source(yaml_spec)
+                    logfire.info(
+                        "Evals generated",
+                        cases=len(yaml_spec.split("- case:")),
+                        attempt=attempt + 1,
+                    )
+
+                except Exception as gen_exc:
+                    logfire.warn(
+                        "Eval spec generation failed on attempt {attempt}, retrying",
+                        attempt=attempt + 1,
+                        error=str(gen_exc),
+                    )
+                    last_failure_context = f"Generation error: {gen_exc}"
+                    if attempt < max_retries:
+                        time.sleep(retry_delay)
+                    continue
 
                 # If no func provided, return without validation
                 if func is None:
                     return runner, yaml_spec
 
                 # Run spec against the provided function
-                test_runner = runner.with_functions({signature.name: func})
+                func_callable = func.impl if isinstance(func, Function) else func
+                test_runner = runner.with_functions({signature.name: func_callable})
                 if ignore_duration:
                     test_runner = test_runner.ignore_duration()
                 summary = test_runner.run()
@@ -778,7 +822,7 @@ IMPORTANT: In assertions, use `input[0]`, `input[1]` to access positional args.
                     return runner, yaml_spec
 
                 # Build failure context for next attempt
-                last_failure_context = self._build_eval_failure_context(summary)
+                last_failure_context = build_failure_context(summary)
                 logfire.warn(
                     "Eval spec below coverage, retrying",
                     coverage=f"{summary.coverage * 100:.0f}%",
@@ -789,31 +833,24 @@ IMPORTANT: In assertions, use `input[0]`, `input[1]` to access positional args.
                 if attempt < max_retries:
                     time.sleep(retry_delay)
 
-        # Exhausted retries — return last generated spec
-        # (summary/runner/yaml_spec are always set when func is not None and loop ran at least once)
-        assert summary is not None and runner is not None  # noqa: S101
-        logfire.warn(
-            "Eval generation exhausted retries",
-            final_coverage=f"{summary.coverage * 100:.0f}%",
-            target=f"{min_coverage * 100:.0f}%",
-        )
-        return runner, yaml_spec
+        # Exhausted retries — return last generated spec if we have one
+        if runner is not None and summary is not None:
+            logfire.warn(
+                "Eval generation exhausted retries",
+                final_coverage=f"{summary.coverage * 100:.0f}%",
+                target=f"{min_coverage * 100:.0f}%",
+            )
+            return runner, yaml_spec
 
-    def _build_eval_failure_context(self, summary: EvalSummary) -> str:
-        """Build a concise failure report to inject into the retry prompt."""
-        lines: list[str] = []
-        for result in summary.results:
-            if result.report:
-                for case in result.report.cases:
-                    failed_assertions = {k: v for k, v in case.assertions.items() if not v.value}
-                    if failed_assertions:
-                        reasons = ", ".join(
-                            f"{k}: {v.reason}" for k, v in failed_assertions.items() if v.reason
-                        )
-                        lines.append(f"- Case '{case.name}' FAILED [{reasons}]")
-            if result.error:
-                lines.append(f"- Error: {result.error}")
-        return "\n".join(lines) if lines else "Unknown failures"
+        # All attempts failed with generation errors — return whatever we have
+        if yaml_spec:
+            runner = RunEvals.from_source(yaml_spec)
+            return runner, yaml_spec
+
+        raise RuntimeError(
+            f"Failed to generate valid eval spec for '{signature.name}' "
+            f"after {max_retries + 1} attempts"
+        )
 
     def generate_implementation(
         self,
@@ -875,6 +912,15 @@ Requirements:
     ) -> TDDResult:
         """Run complete TDD flow: Signature -> Evals -> Implementation.
 
+        1. Generate function signature from description
+        2. Generate eval spec from signature (tests first)
+        3. Generate implementation that passes the evals (code last)
+        4. Run evals & retry implementation on failure
+
+        When ``executor`` is set (at init), generated expected values are
+        validated against actual execution and auto-corrected before the
+        coverage check.
+
         Args:
             description: What the function should do
             name: Function name
@@ -898,7 +944,7 @@ Requirements:
 
         for flow_attempt in range(max_flow_retries + 1):
             with logfire.span("TDD generation flow", name=name, flow_attempt=flow_attempt + 1):
-                # Step 2: Generate evals
+                # Step 2: Generate evals from signature
                 logfire.info("Step 2: Generating evals", flow_attempt=flow_attempt + 1)
                 runner, yaml_spec = self.generate_evals_from_signature(
                     signature,
@@ -912,16 +958,27 @@ Requirements:
 
                 summary: EvalSummary | None = None
                 for impl_attempt in range(max_impl_retries + 1):
-                    func = self.generate_implementation(
-                        signature, yaml_spec, additional_context, description
-                    )
+                    try:
+                        func = self.generate_implementation(
+                            signature, yaml_spec, additional_context, description
+                        )
+                    except RuntimeError as exc:
+                        logfire.warn(
+                            "Implementation failed to compile, retrying",
+                            impl_attempt=impl_attempt + 1,
+                            error=str(exc),
+                        )
+                        if impl_attempt < max_impl_retries:
+                            time.sleep(retry_delay)
+                            continue
+                        raise
 
                     # If max_eval_retries > 0, re-validate evals against this impl
                     if max_eval_retries > 0 and impl_attempt == 0:
                         runner, yaml_spec = self.generate_evals_from_signature(
                             signature,
                             min_cases,
-                            func=func.impl,
+                            func=func,
                             max_retries=max_eval_retries,
                             min_coverage=min_coverage,
                             retry_delay=retry_delay,

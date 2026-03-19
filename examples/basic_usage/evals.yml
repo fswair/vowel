@@ -6,9 +6,11 @@
 greet:
   dataset:
     - case:
+        id: greet_world
         input: "World"
         expected: "Hello, World!"
     - case:
+        id: greet_alice
         input: "Alice"
         expected: "Hello, Alice!"
 
@@ -16,12 +18,15 @@ greet:
 add:
   dataset:
     - case:
+        id: add_positive_pair
         inputs: { x: 1, y: 2 }
         expected: 3
     - case:
+        id: add_zero_sum
         inputs: { x: -5, y: 5 }
         expected: 0
     - case:
+        id: add_large_values
         inputs: { x: 100, y: 200 }
         expected: 300
 
@@ -29,12 +34,15 @@ add:
 multiply:
   dataset:
     - case:
+        id: multiply_basic_product
         inputs: [3, 4]
         expected: 12
     - case:
+        id: multiply_zero_factor
         inputs: [0, 999]
         expected: 0
     - case:
+        id: multiply_negative_product
         inputs: [-2, 5]
         expected: -10
 
@@ -42,15 +50,19 @@ multiply:
 factorial:
   dataset:
     - case:
+        id: factorial_zero_base
         input: 0
         expected: 1
     - case:
+        id: factorial_five
         input: 5
         expected: 120
     - case:
+        id: factorial_ten
         input: 10
         expected: 3628800
     - case:
+        id: factorial_negative_raises
         input: -1
         raises: ValueError
         match: "non-negative"
@@ -59,12 +71,15 @@ factorial:
 is_even:
   dataset:
     - case:
+        id: is_even_four
         input: 4
         expected: true
     - case:
+        id: is_even_seven
         input: 7
         expected: false
     - case:
+        id: is_even_zero
         input: 0
         expected: true
 
@@ -72,9 +87,11 @@ is_even:
 len:
   dataset:
     - case:
+        id: len_list_three
         input: [1, 2, 3]
         expected: 3
     - case:
+        id: len_string_hello
         input: "hello"
         expected: 5
 
@@ -82,14 +99,17 @@ len:
 math.sqrt:
   dataset:
     - case:
+        id: sqrt_16
         input: 16
         expected: 4.0
     - case:
+        id: sqrt_9
         input: 9
         expected: 3.0
 
 os.path.join:
   dataset:
     - case:
+        id: join_home_user
         inputs: ["/home", "user"]
         expected: "/home/user"

@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, PropertyMock, patch
 
 from vowel.eval_types import EvalsSource
 from vowel.tdd import FunctionSignature, Param, TDDGenerator
+from vowel.validation import build_failure_context
 
 
 def _make_signature() -> FunctionSignature:
@@ -35,7 +36,8 @@ add:
   dataset:
     - case:
         inputs: [1, 2]
-        expected: 999
+        expected: 3
+        assertion: "output > 100"
     - case:
         inputs: [0, 0]
         expected: 0
@@ -166,27 +168,21 @@ class TestGenerateEvalsWithFunc(unittest.TestCase):
         mock_agent.run_sync.assert_called_once()
 
 
-class TestBuildEvalFailureContext(unittest.TestCase):
-    """Test the failure context builder."""
+class TestBuildFailureContext(unittest.TestCase):
+    """Test the shared failure context builder."""
 
     def test_builds_context_from_failures(self):
-        gen = TDDGenerator.__new__(TDDGenerator)
-        gen.model = "test"
-
         # Run actual evals with a bad spec to get real summary
         from vowel.runner import RunEvals
 
         summary = RunEvals.from_source(BAD_YAML).with_functions({"add": add}).run()
 
-        context = gen._build_eval_failure_context(summary)
+        context = build_failure_context(summary)
         assert "FAILED" in context
 
     def test_unknown_failures_fallback(self):
-        gen = TDDGenerator.__new__(TDDGenerator)
-        gen.model = "test"
-
         # Mock summary with no useful info
         mock_summary = MagicMock()
         mock_summary.results = []
-        context = gen._build_eval_failure_context(mock_summary)
+        context = build_failure_context(mock_summary)
         assert context == "Unknown failures"

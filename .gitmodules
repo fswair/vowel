@@ -4,3 +4,6 @@
 [submodule "skills/vowel-core"]
 	path = skills/vowel-core
 	url = https://github.com/fswair/vowel-core.git
+[submodule "codemode-benchmark"]
+	path = codemode-benchmark
+	url = https://github.com/fswair/codemode-benchmark
