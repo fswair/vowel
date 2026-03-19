@@ -2154,9 +2154,7 @@ def run_evals(
                 continue
 
             short_name = raw_filter.rsplit(".", 1)[-1]
-            matches = [
-                eval_id for eval_id in all_evals if eval_id.rsplit(".", 1)[-1] == short_name
-            ]
+            matches = [eval_id for eval_id in all_evals if eval_id.rsplit(".", 1)[-1] == short_name]
 
             if len(matches) == 1:
                 resolved_filter_ids.append(matches[0])
