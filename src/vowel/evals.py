@@ -35,6 +35,7 @@ SAFE_ASSERTION_BUILTINS = {
     "list": list,
     "max": max,
     "min": min,
+    "pow": pow,
     "range": range,
     "round": round,
     "set": set,
@@ -68,8 +69,7 @@ SAFE_TYPE_NAMES.update(
 
 
 def _eval_assertion_restricted(condition: str, inputs: dict[str, typing.Any]) -> bool:
-    env = {"__builtins__": SAFE_ASSERTION_BUILTINS}
-    env.update(inputs)
+    env = {**inputs, "__builtins__": SAFE_ASSERTION_BUILTINS}
     return bool(eval(condition, env, env))
 
 
@@ -271,7 +271,8 @@ class AssertionEvaluator(Evaluator):
                 error=str(exc),
             )
             with suppress(Exception):
-                if eval(self.condition, inputs, inputs):
+                fallback_env = {**inputs, "__builtins__": SAFE_ASSERTION_BUILTINS}
+                if eval(self.condition, fallback_env, fallback_env):
                     return EvaluationReason(
                         value=True, reason=f"Assertion passed for condition: {condition}"
                     )
