@@ -300,13 +300,6 @@ class IsInstanceCase(BaseModel):
         ),
     )
 
-    def evaluate(self, output: Any) -> bool:
-        try:
-            expected = _eval_type_restricted(self.type)
-        except Exception:
-            expected = eval(self.type)
-        return isinstance(output, expected)
-
 
 class AssertionCase(BaseModel):
     """Custom assertion evaluation case.
