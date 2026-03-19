@@ -8,6 +8,7 @@ Welcome to the Vowel framework documentation.
 |----------|-------------|
 | [User Guide](./USERGUIDE.md) | Complete guide to using Vowel |
 | [API Reference](./API.md) | Detailed API documentation |
+| [CodeMode](./CODEMODE.md) | Exploration-guided spec generation pipeline and benchmark usage |
 
 ## Quick Links
 
@@ -16,3 +17,4 @@ Welcome to the Vowel framework documentation.
 - **Evaluators**: See [User Guide - Evaluators](./USERGUIDE.md#evaluators)
 - **RunEvals API**: See [API - RunEvals](./API.md#runevals)
 - **EvalGenerator**: See [API - EvalGenerator](./API.md#evalgenerator)
+- **CodeMode**: See [CodeMode Guide](./CODEMODE.md)

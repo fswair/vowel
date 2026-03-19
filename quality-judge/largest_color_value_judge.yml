@@ -1,0 +1,330 @@
+# yaml-language-server: $schema=/Users/mert/.vowel/vowel-schema_035.json
+
+# costs: https://gist.github.com/fswair/7631878d75d6ed18a4fe3cb9b579600f#file-terminal-txt-L1309
+
+evals.generate_spec:
+  evals:
+    EvalSpecCoversFunction:
+      rubric: |
+        You are grading the quality of a generated evaluation spec against the given function source.
+
+        Your task: assess how well the generated spec covers the function's real behavior, edge cases,
+        error paths, and output contracts. Do not reward verbosity; reward correctness and meaningful coverage.
+
+        Calibration rule (critical):
+        - If trusted run results indicate the generated spec achieved 100% pass rate, do NOT confidently claim
+          that specific passing cases are "wrong" just from static suspicion.
+        - In that situation, treat your uncertainty as potential judge hallucination and shift focus to quality:
+          uniqueness, diversity, coverage depth, evaluator precision, and contract alignment.
+        - You may still flag a case as problematic only when there is strong internal evidence (clear contradiction,
+          invalid expectation syntax, impossible assertion, or direct mismatch with the given function contract).
+
+        Score using this weighted rubric (0-100 total):
+
+        1) Functional Coverage (0-35)
+        - Core happy paths are tested.
+        - Boundary/edge conditions are tested (empty/min/max/null-ish/degenerate where relevant).
+        - Important behavior branches in source are represented by cases.
+        - Missing major branch or core behavior: deduct heavily.
+
+        2) Error and Guard Coverage (0-20)
+        - All meaningful raise/guard paths are represented.
+        - Exception type expectations are accurate.
+        - Error-message match checks are used when meaningful.
+        - Missing critical error path: major deduction.
+
+        3) Case Quality and Dataset Design (0-20)
+        - Cases are concrete, non-redundant, and behavior-focused.
+        - Inputs are realistic and varied (not trivial permutations only).
+        - Dataset is unique, diverse, and comprehensive (not AI slop or cosmetic rewrites of same scenario).
+        - Expected values/assertions are specific and verifiable.
+        - No vague, tautological, or self-fulfilling checks.
+
+        4) Evaluator Quality (0-15)
+        - Evaluators are appropriate for the function contract (expected/raises/type/assertion/pattern/etc).
+        - Assertions are precise and meaningful (not always-true).
+        - Type and semantic checks are correctly used where needed.
+        - Evaluators reflect what was actually observed from execution evidence when such evidence is provided.
+
+        5) Spec Correctness and Maintainability (0-10)
+        - YAML is structurally valid and unambiguous.
+        - Case naming/readability is good.
+        - Spec is concise but complete.
+
+        Hard-fail conditions (cap score at 40 max):
+        - Core function behavior is not tested.
+        - Critical error/guard behavior is absent.
+        - Evaluators are mostly weak/tautological/misaligned.
+        - Spec appears invalid or internally inconsistent.
+        - Do NOT trigger hard-fail based only on speculative "this case should fail" claims that conflict with
+          trusted 100% pass execution evidence.
+
+        Return format (mandatory):
+        1) Criterion scores with reasons:
+           - Functional Coverage: <score>/35
+             Reason: <why this score, with concrete evidence from function/spec>
+           - Error and Guard Coverage: <score>/20
+             Reason: <why this score, with concrete evidence>
+           - Case Quality and Dataset Design: <score>/20
+             Reason: <why this score, with concrete evidence>
+           - Evaluator Quality: <score>/15
+             Reason: <why this score, with concrete evidence>
+           - Spec Correctness and Maintainability: <score>/10
+             Reason: <why this score, with concrete evidence>
+
+        2) Final numeric score: <sum>/100
+           - Must equal the sum of criterion scores.
+
+        3) 3-6 key findings (strengths/weaknesses), each tied to specific evidence.
+
+        4) Top 3 actionable improvements, prioritized by impact.
+
+        Important:
+        - Do NOT return only a final score.
+        - Every criterion MUST include both score and explicit reason.
+        - If pass-rate evidence is 100%, prioritize quality diagnostics over speculative invalid-case accusations.
+        - When you suspect a case is wrong despite pass evidence, mark it as "low-confidence concern" unless
+          you can cite direct, concrete contradiction from the source/contract.
+      include:
+        - input
+      config:
+        model: $JUDGE_MODEL
+        max_tokens: 4096
+  dataset:
+    - case:
+        input:
+          name: largestPathValue
+          description: |
+            Largest color value in a directed graph
+
+            There is a directed graph of n colored nodes and m edges. The nodes are numbered from 0 to n - 1.
+
+            You are given a string colors where colors[i] is a lowercase English letter representing the color of the ith node in this graph (0-indexed). You are also given a 2D array edges where edges[j] = [aj, bj] indicates that there is a directed edge from node aj to node bj.
+
+            A valid path in the graph is a sequence of nodes x1 -> x2 -> x3 -> ... -> xk such that there is a directed edge from xi to xi+1 for every 1 <= i < k. The color value of the path is the number of nodes that are colored the most frequently occurring color along that path.
+
+            Return the largest color value of any valid path in the given graph, or -1 if the graph contains a cycle.
+
+
+            Input: colors = "abaca", edges = [[0,1],[0,2],[2,3],[3,4]]
+            Output: 3
+            Explanation: The path 0 -> 2 -> 3 -> 4 contains 3 nodes that are colored "a" (red in the above image).
+
+            Input: colors = "a", edges = [[0,0]]
+            Output: -1
+            Explanation: There is a cycle from 0 to 0.
+
+
+            Constraints:
+                n == colors.length
+                m == edges.length
+                1 <= n <= 105
+                0 <= m <= 105
+                colors consists of lowercase English letters.
+                0 <= aj, bj < n
+          code: |
+            from collections import deque
+
+
+            def largestPathValue(colors: str, edges: list[list[int]]) -> int:
+                n = len(colors)
+                graph = [[] for _ in range(n)]
+                indegree = [0] * n
+
+                for u, v in edges:
+                  graph[u].append(v)
+                  indegree[v] += 1
+
+                dp = [[0] * 26 for _ in range(n)]
+                queue = deque()
+
+                for i in range(n):
+                  if indegree[i] == 0:
+                    queue.append(i)
+                    dp[i][ord(colors[i]) - ord("a")] = 1
+
+                visited = 0
+                answer = 0
+
+                while queue:
+                  node = queue.popleft()
+                  visited += 1
+                  answer = max(answer, max(dp[node]))
+
+                  for nei in graph[node]:
+                    for c in range(26):
+                      dp[nei][c] = max(
+                        dp[nei][c],
+                        dp[node][c] + (1 if c == ord(colors[nei]) - ord("a") else 0),
+                      )
+
+                    indegree[nei] -= 1
+                    if indegree[nei] == 0:
+                      queue.append(nei)
+
+                return answer if visited == n else -1
+        
+
+
+evals.generate_spec_mock:
+  evals:
+    EvalSpecCoversFunction:
+      rubric: |
+        You are grading the quality of a generated evaluation spec against the given function source.
+
+        Your task: assess how well the generated spec covers the function's real behavior, edge cases,
+        error paths, and output contracts. Do not reward verbosity; reward correctness and meaningful coverage.
+
+        Calibration rule (critical):
+        - If trusted run results indicate the generated spec achieved 100% pass rate, do NOT confidently claim
+          that specific passing cases are "wrong" just from static suspicion.
+        - In that situation, treat your uncertainty as potential judge hallucination and shift focus to quality:
+          uniqueness, diversity, coverage depth, evaluator precision, and contract alignment.
+        - You may still flag a case as problematic only when there is strong internal evidence (clear contradiction,
+          invalid expectation syntax, impossible assertion, or direct mismatch with the given function contract).
+
+        Score using this weighted rubric (0-100 total):
+
+        1) Functional Coverage (0-35)
+        - Core happy paths are tested.
+        - Boundary/edge conditions are tested (empty/min/max/null-ish/degenerate where relevant).
+        - Important behavior branches in source are represented by cases.
+        - Missing major branch or core behavior: deduct heavily.
+
+        2) Error and Guard Coverage (0-20)
+        - All meaningful raise/guard paths are represented.
+        - Exception type expectations are accurate.
+        - Error-message match checks are used when meaningful.
+        - Missing critical error path: major deduction.
+
+        3) Case Quality and Dataset Design (0-20)
+        - Cases are concrete, non-redundant, and behavior-focused.
+        - Inputs are realistic and varied (not trivial permutations only).
+        - Dataset is unique, diverse, and comprehensive (not AI slop or cosmetic rewrites of same scenario).
+        - Expected values/assertions are specific and verifiable.
+        - No vague, tautological, or self-fulfilling checks.
+
+        4) Evaluator Quality (0-15)
+        - Evaluators are appropriate for the function contract (expected/raises/type/assertion/pattern/etc).
+        - Assertions are precise and meaningful (not always-true).
+        - Type and semantic checks are correctly used where needed.
+        - Evaluators reflect what was actually observed from execution evidence when such evidence is provided.
+
+        5) Spec Correctness and Maintainability (0-10)
+        - YAML is structurally valid and unambiguous.
+        - Case naming/readability is good.
+        - Spec is concise but complete.
+
+        Hard-fail conditions (cap score at 40 max):
+        - Core function behavior is not tested.
+        - Critical error/guard behavior is absent.
+        - Evaluators are mostly weak/tautological/misaligned.
+        - Spec appears invalid or internally inconsistent.
+        - Do NOT trigger hard-fail based only on speculative "this case should fail" claims that conflict with
+          trusted 100% pass execution evidence.
+
+        Return format (mandatory):
+        1) Criterion scores with reasons:
+           - Functional Coverage: <score>/35
+             Reason: <why this score, with concrete evidence from function/spec>
+           - Error and Guard Coverage: <score>/20
+             Reason: <why this score, with concrete evidence>
+           - Case Quality and Dataset Design: <score>/20
+             Reason: <why this score, with concrete evidence>
+           - Evaluator Quality: <score>/15
+             Reason: <why this score, with concrete evidence>
+           - Spec Correctness and Maintainability: <score>/10
+             Reason: <why this score, with concrete evidence>
+
+        2) Final numeric score: <sum>/100
+           - Must equal the sum of criterion scores.
+
+        3) 3-6 key findings (strengths/weaknesses), each tied to specific evidence.
+
+        4) Top 3 actionable improvements, prioritized by impact.
+
+        Important:
+        - Do NOT return only a final score.
+        - Every criterion MUST include both score and explicit reason.
+        - If pass-rate evidence is 100%, prioritize quality diagnostics over speculative invalid-case accusations.
+        - When you suspect a case is wrong despite pass evidence, mark it as "low-confidence concern" unless
+          you can cite direct, concrete contradiction from the source/contract.
+      include:
+        - input
+      config:
+        model: $JUDGE_MODEL
+        max_tokens: 4096
+  dataset:
+    - case:
+        input:
+          name: largestPathValue
+          description: |
+            Largest color value in a directed graph
+
+            There is a directed graph of n colored nodes and m edges. The nodes are numbered from 0 to n - 1.
+
+            You are given a string colors where colors[i] is a lowercase English letter representing the color of the ith node in this graph (0-indexed). You are also given a 2D array edges where edges[j] = [aj, bj] indicates that there is a directed edge from node aj to node bj.
+
+            A valid path in the graph is a sequence of nodes x1 -> x2 -> x3 -> ... -> xk such that there is a directed edge from xi to xi+1 for every 1 <= i < k. The color value of the path is the number of nodes that are colored the most frequently occurring color along that path.
+
+            Return the largest color value of any valid path in the given graph, or -1 if the graph contains a cycle.
+
+
+            Input: colors = "abaca", edges = [[0,1],[0,2],[2,3],[3,4]]
+            Output: 3
+            Explanation: The path 0 -> 2 -> 3 -> 4 contains 3 nodes that are colored "a" (red in the above image).
+
+            Input: colors = "a", edges = [[0,0]]
+            Output: -1
+            Explanation: There is a cycle from 0 to 0.
+
+
+            Constraints:
+                n == colors.length
+                m == edges.length
+                1 <= n <= 105
+                0 <= m <= 105
+                colors consists of lowercase English letters.
+                0 <= aj, bj < n
+          code: |
+            from collections import deque
+
+
+            def largestPathValue(colors: str, edges: list[list[int]]) -> int:
+                n = len(colors)
+                graph = [[] for _ in range(n)]
+                indegree = [0] * n
+
+                for u, v in edges:
+                  graph[u].append(v)
+                  indegree[v] += 1
+
+                dp = [[0] * 26 for _ in range(n)]
+                queue = deque()
+
+                for i in range(n):
+                  if indegree[i] == 0:
+                    queue.append(i)
+                    dp[i][ord(colors[i]) - ord("a")] = 1
+
+                visited = 0
+                answer = 0
+
+                while queue:
+                  node = queue.popleft()
+                  visited += 1
+                  answer = max(answer, max(dp[node]))
+
+                  for nei in graph[node]:
+                    for c in range(26):
+                      dp[nei][c] = max(
+                        dp[nei][c],
+                        dp[node][c] + (1 if c == ord(colors[nei]) - ord("a") else 0),
+                      )
+
+                    indegree[nei] -= 1
+                    if indegree[nei] == 0:
+                      queue.append(nei)
+
+                return answer if visited == n else -1
+        

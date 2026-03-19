@@ -249,6 +249,36 @@ class FixturesConfig(BaseModel):
     )
 
 
+class SerializerSpec(BaseModel):
+    """Serializer registry entry for YAML-native serializer configuration."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    serializer_schema: str | dict[str, str] | None = Field(
+        default=None,
+        alias="schema",
+        serialization_alias="schema",
+        description=(
+            "Schema converter path(s). Use a single import path string for direct mode, "
+            "or a mapping of parameter name to import path for nested mode."
+        ),
+    )
+    serializer: str | None = Field(
+        default=None,
+        description="Import path to custom serializer function (serial_fn mode).",
+    )
+
+    @model_validator(mode="after")
+    def validate_one_of(self):
+        has_schema = self.serializer_schema is not None
+        has_serializer = self.serializer is not None
+        if has_schema and has_serializer:
+            raise ValueError("Serializer spec cannot define both 'schema' and 'serializer'")
+        if not has_schema and not has_serializer:
+            raise ValueError("Serializer spec must define one of: 'schema' or 'serializer'")
+        return self
+
+
 # =============================================================================
 # Evaluation Case Models
 # =============================================================================
@@ -737,6 +767,14 @@ class Evals(BaseModel):
         examples=[["db"], ["db", "cache"], ["redis"]],
     )
 
+    serializer: str | None = Field(
+        default=None,
+        description=(
+            "Optional serializer registry key from top-level 'serializers'. "
+            "When set, this eval uses that serializer definition."
+        ),
+    )
+
     evals: dict[
         str,
         IsInstanceCase
@@ -807,20 +845,32 @@ class EvalsFile(BaseModel):
         default_factory=dict,
         description="Global fixture definitions available to all evals in this file",
     )
+    serializers: dict[str, SerializerSpec] = Field(
+        default_factory=dict,
+        description="Global serializer definitions available to evals in this file",
+    )
 
     @classmethod
     def model_validate(cls, obj, **kwargs):
         # Parse fixtures if present (don't mutate caller's dict)
         fixtures_data = obj.get("fixtures", {})
-        obj = {k: v for k, v in obj.items() if k != "fixtures"}
+        serializers_data = obj.get("serializers", {})
+        obj = {k: v for k, v in obj.items() if k not in {"fixtures", "serializers"}}
         fixtures = {}
+        serializers = {}
         for name, defn in fixtures_data.items():
             if isinstance(defn, dict):
                 fixtures[name] = FixtureDefinition(**defn)
             elif isinstance(defn, FixtureDefinition):
                 fixtures[name] = defn
 
-        instance = cls.model_construct(fixtures=fixtures, **obj)
+        for name, defn in serializers_data.items():
+            if isinstance(defn, dict):
+                serializers[name] = SerializerSpec(**defn)
+            elif isinstance(defn, SerializerSpec):
+                serializers[name] = defn
+
+        instance = cls.model_construct(fixtures=fixtures, serializers=serializers, **obj)
         return instance
 
     # Pydantic internal attributes to skip when iterating
@@ -843,6 +893,7 @@ class EvalsFile(BaseModel):
             "model_dump",
             "model_dump_json",
             "fixtures",
+            "serializers",
             # Skip fixtures when iterating evals
         }
     )
@@ -851,7 +902,7 @@ class EvalsFile(BaseModel):
         result = {}
         extras = getattr(self, "__pydantic_extra__", {})
         for key, value in extras.items():
-            if key == "fixtures":
+            if key in {"fixtures", "serializers"}:
                 continue
             if isinstance(value, dict) and "dataset" in value:
                 try:

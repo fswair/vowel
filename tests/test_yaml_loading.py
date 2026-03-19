@@ -56,6 +56,43 @@ class TestLoadBundleFromYamlString:
         with pytest.raises(Exception):  # noqa: B017
             load_bundle_from_yaml_string("invalid: [unclosed")
 
+        def test_yaml_with_top_level_serializers(self):
+            """Test loading top-level serializer registry and eval references."""
+            yaml_spec = """
+serializers:
+    user_schema:
+        schema: tests.test_serializer.User
+
+get_user_info:
+    serializer: user_schema
+    dataset:
+        - case:
+                input: {id: 1, name: Alice, email: a@a.com}
+                expected: "User Alice has email a@a.com"
+"""
+            bundle = load_bundle_from_yaml_string(yaml_spec)
+
+            assert "user_schema" in bundle.serializers
+            assert bundle.evals["get_user_info"].serializer == "user_schema"
+
+        def test_yaml_invalid_serializer_spec_raises_error(self):
+            """Serializer specs cannot define both schema and serializer at once."""
+            yaml_spec = """
+serializers:
+    invalid:
+        schema: tests.test_serializer.User
+        serializer: tests.test_serializer.yaml_serialize_user
+
+get_user_info:
+    serializer: invalid
+    dataset:
+        - case:
+                input: {id: 1, name: Alice, email: a@a.com}
+                expected: "User Alice has email a@a.com"
+"""
+            with pytest.raises(Exception):  # noqa: B017
+                load_bundle_from_yaml_string(yaml_spec)
+
 
 class TestLoadBundleFromDict:
     """Tests for load_bundle_from_dict function."""

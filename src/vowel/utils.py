@@ -14,7 +14,7 @@ import types
 from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
-from functools import wraps
+from functools import lru_cache, wraps
 from pathlib import Path, PurePath
 from typing import Any, Literal, Optional, Union, get_args, get_origin
 
@@ -28,7 +28,7 @@ from pydantic_evals.evaluators import Contains, EqualsExpected, Evaluator, MaxDu
 from pydantic_evals.reporting import EvaluationReport
 
 from .errors import FixturePathError, SignatureError
-from .eval_types import Evals, EvalsFile, FixtureDefinition
+from .eval_types import Evals, EvalsFile, FixtureDefinition, SerializerSpec
 from .evals import (
     AssertionEvaluator,
     ContainsInputEvaluator,
@@ -38,6 +38,8 @@ from .evals import (
     create_llm_judge,
 )
 from .executor import Executor
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 # =============================================================================
 # Evals Bundle - Container for evals and fixtures
@@ -51,6 +53,7 @@ class EvalsBundle(BaseModel):
 
     evals: dict[str, Evals] = Field(min_length=1)
     fixtures: dict[str, FixtureDefinition] = Field(default_factory=dict)
+    serializers: dict[str, SerializerSpec] = Field(default_factory=dict)
 
     def to_yaml(self) -> str:
         """Serialize bundle to current vowel YAML spec format."""
@@ -74,6 +77,17 @@ class EvalsBundle(BaseModel):
                     exclude_defaults=True,
                 )
                 for name, definition in self.fixtures.items()
+            }
+
+        if self.serializers:
+            data["serializers"] = {
+                name: serializer.model_dump(
+                    mode="python",
+                    by_alias=True,
+                    exclude_none=True,
+                    exclude_defaults=True,
+                )
+                for name, serializer in self.serializers.items()
             }
 
         return yaml.safe_dump(
@@ -365,17 +379,20 @@ def check_compatibility(func: Callable) -> tuple[bool, list[str]]:
 
 @contextlib.contextmanager
 def _cwd_on_syspath() -> Any:
-    """Temporarily prepend the current working directory to ``sys.path``."""
+    """Temporarily prepend cwd and project root to ``sys.path``."""
     cwd = os.getcwd()
-    inserted = cwd not in sys.path
-    if inserted:
-        sys.path.insert(0, cwd)
+    candidates = [cwd, str(PROJECT_ROOT)]
+    inserted: list[str] = []
+    for candidate in candidates:
+        if candidate not in sys.path:
+            sys.path.insert(0, candidate)
+            inserted.append(candidate)
     try:
         yield
     finally:
-        if inserted:
+        for candidate in inserted:
             with contextlib.suppress(ValueError):
-                sys.path.remove(cwd)
+                sys.path.remove(candidate)
 
 
 def _is_yaml_source_string(source_str: str) -> bool:
@@ -859,9 +876,12 @@ def import_function(module_path: str) -> Any:
                     error=str(e),
                 )
                 relative_path = module_name.replace(".", os.sep) + ".py"
-                file_path = os.path.join(os.getcwd(), relative_path)
+                candidate_roots = [os.getcwd(), str(PROJECT_ROOT)]
 
-                if os.path.exists(file_path):
+                for root in candidate_roots:
+                    file_path = os.path.join(root, relative_path)
+                    if not os.path.exists(file_path):
+                        continue
                     try:
                         spec = importlib.util.spec_from_file_location(module_name, file_path)
                         if spec and spec.loader:
@@ -870,6 +890,7 @@ def import_function(module_path: str) -> Any:
                             logfire.debug(
                                 "File-based import succeeded for '{file_path}'", file_path=file_path
                             )
+                            break
                     except Exception as e:
                         logfire.debug(
                             "File-based import failed for '{file_path}': {error}",
@@ -898,6 +919,46 @@ def import_function(module_path: str) -> Any:
     raise ImportError(
         f"Cannot import '{module_path}'. Tried combinations:\n"
         + "\n".join(f"  - {c}" for c in tried_combinations)
+    )
+
+
+@lru_cache(maxsize=512)
+def _import_path_cached(path: str) -> Any:
+    """Import and cache objects referenced by import paths."""
+    return import_function(path)
+
+
+def _resolve_yaml_serializer_entry(
+    serializers: Mapping[str, SerializerSpec],
+    serializer_name: str,
+) -> tuple[type | Callable | dict[str, type | Callable] | None, Callable[[dict], Any] | None]:
+    """Resolve a serializer registry entry into schema or serial_fn mapping values."""
+    if serializer_name not in serializers:
+        available = sorted(serializers.keys())
+        raise ValueError(
+            f"Unknown serializer '{serializer_name}'. Available serializers: {available}"
+        )
+
+    spec = serializers[serializer_name]
+
+    if spec.serializer is not None:
+        loaded = _import_path_cached(spec.serializer)
+        if not callable(loaded):
+            raise TypeError(f"Serializer '{spec.serializer}' must resolve to a callable")
+        return None, loaded
+
+    schema = spec.serializer_schema
+    if isinstance(schema, str):
+        return _import_path_cached(schema), None
+
+    if isinstance(schema, dict):
+        resolved: dict[str, type | Callable] = {}
+        for key, path in schema.items():
+            resolved[key] = _import_path_cached(path)
+        return resolved, None
+
+    raise ValueError(
+        f"Serializer '{serializer_name}' must define one of: schema (str|dict) or serializer"
     )
 
 
@@ -950,26 +1011,42 @@ def load_bundle_file(yaml_path: str) -> EvalsBundle:
         loaded = yaml.safe_load(f)
 
     evals_file = EvalsFile.model_validate(loaded)
-    return EvalsBundle(evals=evals_file.get_evals(), fixtures=evals_file.fixtures)
+    return EvalsBundle(
+        evals=evals_file.get_evals(),
+        fixtures=evals_file.fixtures,
+        serializers=evals_file.serializers,
+    )
 
 
 def load_bundle_from_yaml_string(yaml_content: str) -> EvalsBundle:
     """Load evals and fixtures from a YAML string."""
     loaded = yaml.safe_load(yaml_content)
     evals_file = EvalsFile.model_validate(loaded)
-    return EvalsBundle(evals=evals_file.get_evals(), fixtures=evals_file.fixtures)
+    return EvalsBundle(
+        evals=evals_file.get_evals(),
+        fixtures=evals_file.fixtures,
+        serializers=evals_file.serializers,
+    )
 
 
 def load_bundle_from_dict(data: dict) -> EvalsBundle:
     """Load evals and fixtures from a dictionary."""
     evals_file = EvalsFile.model_validate(data)
-    return EvalsBundle(evals=evals_file.get_evals(), fixtures=evals_file.fixtures)
+    return EvalsBundle(
+        evals=evals_file.get_evals(),
+        fixtures=evals_file.fixtures,
+        serializers=evals_file.serializers,
+    )
 
 
 def load_bundle_from_object(evals_obj: EvalsFile) -> EvalsBundle:
     """Load evals and fixtures from an EvalsFile object."""
     assert isinstance(evals_obj, EvalsFile)
-    return EvalsBundle(evals=evals_obj.get_evals(), fixtures=evals_obj.fixtures)
+    return EvalsBundle(
+        evals=evals_obj.get_evals(),
+        fixtures=evals_obj.fixtures,
+        serializers=evals_obj.serializers,
+    )
 
 
 def load_bundle(source: str | Path | dict | EvalsFile) -> EvalsBundle:
@@ -1118,7 +1195,7 @@ def to_dataset(
             display_input = f"inputs: {match_case.inputs}"
             input_value = {"inputs": match_case.inputs}
         else:
-            display_input = f"input: {match_case.input}"
+            display_input = f"input: {str(match_case.input)[:300]}"
             input_value = {"input": match_case.input}
 
         if any(case for case in dataset_cases if input_value == case.inputs):
@@ -1550,6 +1627,17 @@ def _evaluate_single_function(
         func_serial_fn = _resolve_eval_id_mapping(
             serial_fn, eval_id, mapping_name="serializer function"
         )
+
+        for evaluator in dataset.evaluators:
+            if isinstance(evaluator, AssertionEvaluator):
+                evaluator.serializer = func_schema
+                evaluator.serializer_fn = func_serial_fn
+
+        for case in dataset.cases:
+            for evaluator in case.evaluators:
+                if isinstance(evaluator, AssertionEvaluator):
+                    evaluator.serializer = func_schema
+                    evaluator.serializer_fn = func_serial_fn
 
         # Setup module-scoped fixtures for this eval
         module_fixtures = {}
@@ -2046,6 +2134,7 @@ def run_evals(
     bundle = source if isinstance(source, EvalsBundle) else load_bundle(source)
     all_evals = bundle.evals
     yaml_fixtures = bundle.fixtures
+    yaml_serializers = bundle.serializers
 
     # Merge programmatic fixtures with YAML fixtures
     merged_fixtures, fixture_funcs = _merge_programmatic_fixtures(yaml_fixtures, fixtures)
@@ -2057,13 +2146,37 @@ def run_evals(
     serial_fn = serial_fn or {}
 
     if filter_funcs:
-        filtered_evals = {k: v for k, v in all_evals.items() if k in filter_funcs}
+        resolved_filter_ids: list[str] = []
+
+        for raw_filter in filter_funcs:
+            if raw_filter in all_evals:
+                resolved_filter_ids.append(raw_filter)
+                continue
+
+            short_name = raw_filter.rsplit(".", 1)[-1]
+            matches = [
+                eval_id for eval_id in all_evals if eval_id.rsplit(".", 1)[-1] == short_name
+            ]
+
+            if len(matches) == 1:
+                resolved_filter_ids.append(matches[0])
+            elif len(matches) > 1:
+                candidates = sorted(matches)
+                raise ValueError(
+                    f"Ambiguous filter '{raw_filter}'. Provide an exact eval id. "
+                    f"Candidates: {candidates}"
+                )
+        # Keep stable input order while removing duplicates.
+        ordered_unique_filter_ids = list(dict.fromkeys(resolved_filter_ids))
+        filtered_evals = {k: v for k, v in all_evals.items() if k in ordered_unique_filter_ids}
+
         if not filtered_evals:
             available = list(all_evals.keys())
             raise ValueError(
                 f"No functions found matching filters: {', '.join(filter_funcs)}. "
                 f"Available: {', '.join(available)}"
             )
+
         all_evals = filtered_evals
 
     # Create fixture manager if fixtures are defined
@@ -2074,14 +2187,43 @@ def run_evals(
     try:
         for eval_id, evals in all_evals.items():
             try:
+                effective_schema = dict(schema)
+                effective_serial_fn = dict(serial_fn)
+
+                # YAML-native serializer registry (per-eval reference).
+                if evals.serializer:
+                    yaml_schema, yaml_serial = _resolve_yaml_serializer_entry(
+                        yaml_serializers,
+                        evals.serializer,
+                    )
+
+                    # Programmatic mappings have precedence.
+                    has_programmatic_schema = (
+                        _resolve_eval_id_mapping(schema, eval_id, mapping_name="serializer schema")
+                        is not None
+                    )
+                    has_programmatic_serial = (
+                        _resolve_eval_id_mapping(
+                            serial_fn,
+                            eval_id,
+                            mapping_name="serializer function",
+                        )
+                        is not None
+                    )
+
+                    if yaml_schema is not None and not has_programmatic_schema:
+                        effective_schema[eval_id] = yaml_schema
+                    if yaml_serial is not None and not has_programmatic_serial:
+                        effective_serial_fn[eval_id] = yaml_serial
+
                 result = _evaluate_single_function(
                     eval_id,
                     evals,
                     functions,
                     merged_fixtures,
                     fixture_manager,
-                    schema,
-                    serial_fn,
+                    effective_schema,
+                    effective_serial_fn,
                     ignore_duration,
                 )
                 results.append(result)

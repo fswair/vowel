@@ -46,7 +46,7 @@ pip install -e ".[all]"
 ## Quick Start
 
 > **Note:**  
-> For a deeper understanding of how vowel handles fixtures, see the examples in [`db_fixture.yml`](./db_fixture.yml) and [`db.py`](./db.py). These files demonstrate the underlying mechanics of fixture setup and usage.
+> For a deeper understanding of how vowel handles fixtures, see the examples in [`examples/db_fixtures`](./examples/db_fixtures/). These example demonstrate the underlying mechanics of fixture setup and usage.
 
 > **Tip:**  
 > To enable YAML schema validation in your editor, place `vowel-schema.json` in your project directory.  
@@ -183,6 +183,29 @@ def query_user(user_id: int, *, db: dict) -> dict | None:
     return db["users"].get(user_id)
 ```
 
+Fixture scope aliases:
+- Preferred scope names: `case`, `eval`, `file`
+- Backward-compatible aliases: `function`, `module`, `session`
+- Normalization mapping: `case -> function`, `eval -> module`, `file -> session`
+
+Example:
+
+```yaml
+fixtures:
+  temp_data:
+    setup: myapp.make_temp_data
+    scope: case
+
+  db:
+    setup: myapp.setup_db
+    teardown: myapp.close_db
+    scope: eval
+
+  cache:
+    setup: myapp.setup_cache
+    scope: file
+```
+
 > **Full reference:** [docs/FIXTURES.md](https://github.com/fswair/vowel/blob/main/docs/FIXTURES.md)
 
 ### Input Serializers
@@ -199,6 +222,24 @@ summary = (
 ```
 
 > **Serializer key matching:** Serializer mappings follow the same rule as `.with_functions(...)` — both `module.function` and short `function` keys are accepted.
+
+> **Assertion context and serializers:** When a serializer is configured, assertion evaluators use the serialized value for `input` (not raw YAML). This applies to schema mode, `serial_fn`, and nested/dict schemas.
+
+Runnable example (YAML-native serializers + fixtures):
+
+```bash
+vowel examples/serializers/db_query_evals.yml
+```
+
+This example demonstrates:
+- top-level `serializers:` registry with both `schema` and `serializer` entries,
+- per-eval `serializer:` references,
+- fixture class lifecycle wiring with `cls` + `teardown`,
+- assertion checks that read serialized `input` values.
+
+See:
+- `examples/serializers/db_query_evals.yml`
+- `examples/serializers/util.py`
 
 > **Full reference:** [docs/SERIALIZERS.md](https://github.com/fswair/vowel/blob/main/docs/SERIALIZERS.md)
 
@@ -263,6 +304,9 @@ vowel evals.yml --dry-run                # Show plan without running
 vowel evals.yml --export-json out.json   # Export results
 vowel evals.yml -v                       # Verbose summary
 vowel evals.yml -v --hide-report         # Verbose, hide pydantic_evals report
+vowel schema examples/serializers/db_query_evals.yml   # Validate + update schema header
+vowel schema --create                                   # Generate vowel-schema.json
+vowel costs --list                                      # List tracked generation/run costs
 ```
 
 > **Full reference:** [docs/CLI.md](https://github.com/fswair/vowel/blob/main/docs/CLI.md)

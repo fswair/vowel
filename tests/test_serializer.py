@@ -28,6 +28,16 @@ def process_with_config(user: User, config: Config) -> str:
     return f"{user.name} (timeout={config.timeout})"
 
 
+def yaml_serialize_user(data: dict) -> User:
+    """Serializer function used by YAML-native serializer registry tests."""
+    raw = data.get("input") or data.get("inputs")
+    if isinstance(raw, list):
+        raw = raw[0]
+    if not isinstance(raw, dict):
+        raise ValueError("Expected serializer input payload to be a dict")
+    return User(**raw)
+
+
 class TestSchemaSerializer:
     """Tests for schema-based serialization."""
 
@@ -147,6 +157,36 @@ class TestSchemaSerializer:
         )
         assert summary.all_passed
 
+    def test_assertion_uses_serialized_input_with_dict_schema(self):
+        """Assertion `input` should contain per-param serialized objects for dict schema."""
+        spec = {
+            "process_with_config": {
+                "evals": {
+                    "CheckSerializedInput": {
+                        "assertion": "input['user'].email.endswith('@a.com') and input['config'].timeout == 30"
+                    }
+                },
+                "dataset": [
+                    {
+                        "case": {
+                            "inputs": {
+                                "user": {"id": 1, "name": "Alice", "email": "a@a.com"},
+                                "config": {"timeout": 30, "verbose": True},
+                            },
+                            "expected": "Alice (timeout=30)",
+                        }
+                    },
+                ],
+            }
+        }
+        summary = (
+            RunEvals.from_dict(spec)
+            .with_functions({"process_with_config": process_with_config})
+            .with_serializer({"process_with_config": {"user": User, "config": Config}})
+            .run()
+        )
+        assert summary.all_passed
+
     def test_no_serializer_passthrough(self):
         """Without serializer, dict is passed as-is."""
 
@@ -210,6 +250,29 @@ class TestSchemaSerializer:
                         }
                     },
                 ]
+            }
+        }
+        summary = (
+            RunEvals.from_dict(spec)
+            .with_functions({"get_user_info": get_user_info})
+            .with_serializer({"get_user_info": User})
+            .run()
+        )
+        assert summary.all_passed
+
+    def test_assertion_uses_serialized_input_with_schema(self):
+        """Assertion `input` should be the schema-serialized object, not raw YAML dict."""
+        spec = {
+            "get_user_info": {
+                "evals": {"CheckSerializedInput": {"assertion": "input.email.endswith('@a.com')"}},
+                "dataset": [
+                    {
+                        "case": {
+                            "input": {"id": 1, "name": "Alice", "email": "a@a.com"},
+                            "expected": "User Alice has email a@a.com",
+                        }
+                    },
+                ],
             }
         }
         summary = (
@@ -355,6 +418,35 @@ class TestSerialFn:
         )
         assert summary.all_passed
 
+    def test_assertion_uses_serialized_input_with_serial_fn(self):
+        """Assertion `input` should reflect serial_fn output type."""
+
+        def serialize_user(d: dict) -> User:
+            data = d.get("input") or d.get("inputs")
+            assert data is not None
+            return User(**data)
+
+        spec = {
+            "get_user_info": {
+                "evals": {"CheckSerializedInput": {"assertion": "input.id == 7"}},
+                "dataset": [
+                    {
+                        "case": {
+                            "input": {"id": 7, "name": "Ada", "email": "ada@a.com"},
+                            "expected": "User Ada has email ada@a.com",
+                        }
+                    },
+                ],
+            }
+        }
+        summary = (
+            RunEvals.from_dict(spec)
+            .with_functions({"get_user_info": get_user_info})
+            .with_serializer(serial_fn={"get_user_info": serialize_user})
+            .run()
+        )
+        assert summary.all_passed
+
 
 class TestSerializerChaining:
     """Tests for serializer method chaining."""
@@ -467,3 +559,88 @@ class TestSerializerEdgeCases:
         )
         assert not summary.all_passed
         assert summary.failed_count == 1
+
+
+class TestYamlNativeSerializerRegistry:
+    """Tests for YAML-native top-level serializer registry."""
+
+    def test_yaml_registry_schema_mode(self):
+        yaml_spec = """
+serializers:
+    user_schema:
+        schema: tests.test_serializer.User
+
+get_user_info:
+    serializer: user_schema
+    dataset:
+        - case:
+                input: {id: 1, name: Alice, email: a@a.com}
+                expected: "User Alice has email a@a.com"
+"""
+        summary = (
+            RunEvals.from_source(yaml_spec).with_functions({"get_user_info": get_user_info}).run()
+        )
+        assert summary.all_passed
+
+    def test_yaml_registry_serial_fn_mode(self):
+        yaml_spec = """
+serializers:
+    user_custom:
+        serializer: tests.test_serializer.yaml_serialize_user
+
+get_user_info:
+    serializer: user_custom
+    dataset:
+        - case:
+                inputs: {id: 2, name: Bob, email: b@b.com}
+                expected: "User Bob has email b@b.com"
+"""
+        summary = (
+            RunEvals.from_source(yaml_spec).with_functions({"get_user_info": get_user_info}).run()
+        )
+        assert summary.all_passed
+
+    def test_yaml_registry_imports_are_cached(self, monkeypatch):
+        """Same serializer path used by multiple evals should be imported once."""
+        from vowel import utils as utils_module
+
+        calls: list[str] = []
+        original_import_function = utils_module.import_function
+
+        def counting_import(path: str):
+            calls.append(path)
+            return original_import_function(path)
+
+        utils_module._import_path_cached.cache_clear()
+        monkeypatch.setattr(utils_module, "import_function", counting_import)
+
+        yaml_spec = """
+serializers:
+    user_schema:
+        schema: tests.test_serializer.User
+
+get_user_info:
+    serializer: user_schema
+    dataset:
+        - case:
+                input: {id: 1, name: Alice, email: a@a.com}
+                expected: "User Alice has email a@a.com"
+
+get_user_name:
+    serializer: user_schema
+    dataset:
+        - case:
+                input: {id: 2, name: Bob, email: b@b.com}
+                expected: "Bob"
+"""
+
+        def get_user_name(user: User) -> str:
+            return user.name
+
+        summary = (
+            RunEvals.from_source(yaml_spec)
+            .with_functions({"get_user_info": get_user_info, "get_user_name": get_user_name})
+            .run()
+        )
+        assert summary.all_passed
+        assert calls.count("tests.test_serializer.User") == 1

@@ -11,12 +11,15 @@ validate_email:
       strict: true
   dataset:
     - case:
+        id: email_valid_user_example
         input: "user@example.com"
         expected: true
     - case:
+        id: email_invalid_missing_at
         input: "invalid.email"
         expected: false
     - case:
+        id: email_invalid_missing_user
         input: "@nodomain.com"
         expected: false
 
@@ -31,12 +34,15 @@ calculate_discount:
       assertion: "output <= input[0]"
   dataset:
     - case:
+        id: discount_20_percent
         inputs: [100.0, 20.0]
         expected: 80.0
     - case:
+        id: discount_half_price
         inputs: [50.0, 50.0]
         expected: 25.0
     - case:
+        id: discount_zero_percent
         inputs: [200.0, 0.0]
         expected: 200.0
 
@@ -48,9 +54,11 @@ format_phone:
       pattern: "^\\(\\d{3}\\) \\d{3}-\\d{4}$"
   dataset:
     - case:
+        id: phone_555_format
         input: "5551234567"
         expected: "(555) 123-4567"
     - case:
+        id: phone_212_format
         input: "2129876543"
         expected: "(212) 987-6543"
 
@@ -64,12 +72,15 @@ fibonacci:
       duration: 0.01
   dataset:
     - case:
+        id: fib_0
         input: 0
         expected: 0
     - case:
+        id: fib_10
         input: 10
         expected: 55
     - case:
+        id: fib_20
         input: 20
         expected: 6765
 
@@ -83,11 +94,13 @@ extract_hashtags:
       assertion: "all(tag.startswith('#') for tag in output) if output else True"
   dataset:
     - case:
+        id: hashtags_two
         input: "Learning #python and #coding today!"
         expected:
           - "#python"
           - "#coding"
     - case:
+        id: hashtags_none
         input: "No hashtags here"
         expected: []
 
@@ -106,12 +119,12 @@ classify_age_group:
         (18 <= input < 65 and output == 'adult') or\
         (input >= 65 and output == 'senior')
   dataset:
-    - case: { input: 5, expected: "child" }
-    - case: { input: 15, expected: "teenager" }
-    - case: { input: 30, expected: "adult" }
-    - case: { input: 70, expected: "senior" }
-    - case: { input: 12, expected: "child" }
-    - case: { input: 18, expected: "adult" }
+    - case: { id: age_5_child, input: 5, expected: "child" }
+    - case: { id: age_15_teenager, input: 15, expected: "teenager" }
+    - case: { id: age_30_adult, input: 30, expected: "adult" }
+    - case: { id: age_70_senior, input: 70, expected: "senior" }
+    - case: { id: age_12_child_boundary, input: 12, expected: "child" }
+    - case: { id: age_18_adult_boundary, input: 18, expected: "adult" }
 
 # ─── Raises (Exception Testing) ──────────────────────────────
 # Verify that specific exceptions are raised with optional message matching.
@@ -125,12 +138,15 @@ calculate_bmi:
       assertion: "abs(output - input[0] / (input[1] ** 2)) < 0.1"
   dataset:
     - case:
+        id: bmi_normal_weight
         inputs: [70.0, 1.75]
         expected: 22.86
     - case:
+        id: bmi_overweight_range
         inputs: [85.0, 1.80]
         expected: 26.23
     - case:
+        id: bmi_zero_weight_raises
         inputs: [0.0, 1.70]
         raises: ValueError
         match: "positive"

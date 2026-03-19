@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.metadata
 import json
 import re
@@ -34,6 +35,7 @@ def build_yaml_schema_from_bundle() -> dict[str, Any]:
     No repository reference file is used. The root shape is forced to match
     vowel's YAML file format:
     - top-level optional `fixtures`
+    - top-level optional `serializers`
     - top-level additionalProperties => per-function `Evals`
     """
     bundle_schema = EvalsBundle.model_json_schema(ref_template="#/$defs/{model}")
@@ -44,6 +46,13 @@ def build_yaml_schema_from_bundle() -> dict[str, Any]:
         {
             "type": "object",
             "title": "Fixtures",
+        },
+    )
+    serializers_schema = properties.get(
+        "serializers",
+        {
+            "type": "object",
+            "title": "Serializers",
         },
     )
 
@@ -71,6 +80,7 @@ def build_yaml_schema_from_bundle() -> dict[str, Any]:
         "type": "object",
         "properties": {
             "fixtures": fixtures_schema,
+            "serializers": serializers_schema,
         },
         "additionalProperties": additional_properties,
         "$defs": defs,
@@ -81,12 +91,13 @@ def build_yaml_schema_from_bundle() -> dict[str, Any]:
 
 def ensure_cached_schema(version: str | None = None) -> Path:
     """Ensure the versioned schema file exists and is up to date."""
-    token = _schema_version_token(version)
-    schema_path = SCHEMA_CACHE_DIR / f"vowel-schema_{token}.json"
-    schema_path.parent.mkdir(parents=True, exist_ok=True)
-
     schema_data = build_yaml_schema_from_bundle()
     rendered = json.dumps(schema_data, indent=2, ensure_ascii=False) + "\n"
+
+    token = _schema_version_token(version)
+    digest = hashlib.sha1(rendered.encode("utf-8")).hexdigest()[:8]
+    schema_path = SCHEMA_CACHE_DIR / f"vowel-schema_{token}_{digest}.json"
+    schema_path.parent.mkdir(parents=True, exist_ok=True)
 
     if not schema_path.exists() or schema_path.read_text(encoding="utf-8") != rendered:
         schema_path.write_text(rendered, encoding="utf-8")

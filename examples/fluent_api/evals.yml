@@ -5,23 +5,23 @@ double:
     IsInt:
       type: int
   dataset:
-    - case: { input: 5, expected: 10 }
-    - case: { input: 0, expected: 0 }
-    - case: { input: -4, expected: -8 }
+    - case: { id: double_positive, input: 5, expected: 10 }
+    - case: { id: double_zero, input: 0, expected: 0 }
+    - case: { id: double_negative, input: -4, expected: -8 }
 
 triple:
   dataset:
-    - case: { input: 3, expected: 9 }
-    - case: { input: -1, expected: -3 }
+    - case: { id: triple_positive, input: 3, expected: 9 }
+    - case: { id: triple_negative, input: -1, expected: -3 }
 
 reverse:
   evals:
     IsString:
       type: str
   dataset:
-    - case: { input: "hello", expected: "olleh" }
-    - case: { input: "abcba", expected: "abcba" }
-    - case: { input: "", expected: "" }
+    - case: { id: reverse_hello, input: "hello", expected: "olleh" }
+    - case: { id: reverse_palindrome, input: "abcba", expected: "abcba" }
+    - case: { id: reverse_empty, input: "", expected: "" }
 
 fizzbuzz:
   evals:
@@ -30,8 +30,8 @@ fizzbuzz:
     ValidOutput:
       pattern: "^(Fizz|Buzz|FizzBuzz|\\d+)$"
   dataset:
-    - case: { input: 1, expected: "1" }
-    - case: { input: 3, expected: "Fizz" }
-    - case: { input: 5, expected: "Buzz" }
-    - case: { input: 15, expected: "FizzBuzz" }
-    - case: { input: 7, expected: "7" }
+    - case: { id: fizzbuzz_1, input: 1, expected: "1" }
+    - case: { id: fizzbuzz_3, input: 3, expected: "Fizz" }
+    - case: { id: fizzbuzz_5, input: 5, expected: "Buzz" }
+    - case: { id: fizzbuzz_15, input: 15, expected: "FizzBuzz" }
+    - case: { id: fizzbuzz_7, input: 7, expected: "7" }

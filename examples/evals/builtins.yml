@@ -3,53 +3,55 @@
 
 len:
   dataset:
-    - case: { input: [1, 2, 3], expected: 3 }
-    - case: { input: "hello", expected: 5 }
-    - case: { input: [], expected: 0 }
+    - case: { id: len_list_three, input: [1, 2, 3], expected: 3 }
+    - case: { id: len_string_hello, input: "hello", expected: 5 }
+    - case: { id: len_empty_list, input: [], expected: 0 }
 
 abs:
   dataset:
-    - case: { input: -7, expected: 7 }
-    - case: { input: 0, expected: 0 }
-    - case: { input: 42, expected: 42 }
+    - case: { id: abs_negative, input: -7, expected: 7 }
+    - case: { id: abs_zero, input: 0, expected: 0 }
+    - case: { id: abs_positive, input: 42, expected: 42 }
 
 sorted:
   dataset:
-    - case: { input: [3, 1, 2], expected: [1, 2, 3] }
-    - case: { input: [5, 5, 5], expected: [5, 5, 5] }
-    - case: { input: [], expected: [] }
+    - case: { id: sorted_unsorted_numbers, input: [3, 1, 2], expected: [1, 2, 3] }
+    - case: { id: sorted_all_equal, input: [5, 5, 5], expected: [5, 5, 5] }
+    - case: { id: sorted_empty_list, input: [], expected: [] }
 
 sum:
   dataset:
-    - case: { input: [1, 2, 3], expected: 6 }
-    - case: { input: [], expected: 0 }
+    - case: { id: sum_simple_list, input: [1, 2, 3], expected: 6 }
+    - case: { id: sum_empty_list, input: [], expected: 0 }
 
 min:
   dataset:
-    - case: { input: [3, 1, 2], expected: 1 }
-    - case: { input: [99], expected: 99 }
+    - case: { id: min_list_values, input: [3, 1, 2], expected: 1 }
+    - case: { id: min_singleton, input: [99], expected: 99 }
 
 max:
   dataset:
-    - case: { input: [3, 1, 2], expected: 3 }
+    - case: { id: max_list_values, input: [3, 1, 2], expected: 3 }
 
 math.sqrt:
   dataset:
-    - case: { input: 16, expected: 4.0 }
-    - case: { input: 9, expected: 3.0 }
-    - case: { input: 0, expected: 0.0 }
+    - case: { id: sqrt_16, input: 16, expected: 4.0 }
+    - case: { id: sqrt_9, input: 9, expected: 3.0 }
+    - case: { id: sqrt_0, input: 0, expected: 0.0 }
 
 math.factorial:
   dataset:
-    - case: { input: 0, expected: 1 }
-    - case: { input: 5, expected: 120 }
-    - case: { input: 10, expected: 3628800 }
+    - case: { id: factorial_0, input: 0, expected: 1 }
+    - case: { id: factorial_5, input: 5, expected: 120 }
+    - case: { id: factorial_10, input: 10, expected: 3628800 }
 
 os.path.join:
   dataset:
     - case:
+        id: join_two_parts
         inputs: ["/home", "user"]
         expected: "/home/user"
     - case:
+        id: join_three_parts
         inputs: ["/var", "log", "app.log"]
         expected: "/var/log/app.log"

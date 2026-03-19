@@ -8,6 +8,13 @@
       },
       "title": "Fixtures",
       "type": "object"
+    },
+    "serializers": {
+      "additionalProperties": {
+        "$ref": "#/$defs/SerializerSpec"
+      },
+      "title": "Serializers",
+      "type": "object"
     }
   },
   "additionalProperties": {
@@ -143,6 +150,19 @@
           },
           "title": "Fixture",
           "type": "array"
+        },
+        "serializer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional serializer registry key from top-level 'serializers'. When set, this eval uses that serializer definition.",
+          "title": "Serializer"
         },
         "evals": {
           "additionalProperties": {
@@ -711,6 +731,46 @@
       "title": "PatternMatchCase",
       "type": "object"
     },
+    "SerializerSpec": {
+      "additionalProperties": false,
+      "description": "Serializer registry entry for YAML-native serializer configuration.",
+      "properties": {
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Schema converter path(s). Use a single import path string for direct mode, or a mapping of parameter name to import path for nested mode.",
+          "title": "Schema"
+        },
+        "serializer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Import path to custom serializer function (serial_fn mode).",
+          "title": "Serializer"
+        }
+      },
+      "title": "SerializerSpec",
+      "type": "object"
+    },
     "EvalsMapValue": {
       "additionalProperties": false,
       "description": "Function evaluation specification keyed by function import path/name. Contains fixture dependencies, global evaluators (`evals`), and dataset cases.",
@@ -745,6 +805,19 @@
           },
           "title": "Fixture",
           "type": "array"
+        },
+        "serializer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional serializer registry key from top-level 'serializers'. When set, this eval uses that serializer definition.",
+          "title": "Serializer"
         },
         "evals": {
           "additionalProperties": {

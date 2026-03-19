@@ -72,8 +72,4 @@ docs/FIXTURE_GENERATION_RFC.md
 
 # Benchmarks
 benchmark*
-parse_cron_evals.yml
-
-# Known Models with Costs
-costs.yml
-db_fixture_serializers.yml
+important-links.md

@@ -15,8 +15,10 @@
 
 import logfire
 
+from vowel.monitoring import enable_monitoring
+
 # enable observability (optional)
-# logfire.configure(service_name="db-fixture")
+enable_monitoring(service_name="db-fixture")
 
 
 class NoTableError(Exception):

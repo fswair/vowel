@@ -82,24 +82,29 @@ Fixtures support three lifecycle scopes (defined in YAML):
 
 | Scope | Behavior |
 |-------|----------|
-| `function` (default) | Setup/teardown for **each** test case |
-| `module` | Setup once per eval spec, teardown after all cases |
-| `session` | Setup once per `run_evals()` call, teardown at end |
+| `case` (preferred) / `function` (alias, default) | Setup/teardown for **each** test case |
+| `eval` (preferred) / `module` (alias) | Setup once per eval spec, teardown after all cases |
+| `file` (preferred) / `session` (alias) | Setup once per `run_evals()` call, teardown at end |
+
+Alias normalization:
+- `case -> function`
+- `eval -> module`
+- `file -> session`
 
 ```yaml
 fixtures:
   temp_file:
     setup: my_fixtures.temp_file
-    scope: function
+    scope: case
 
   db:
     setup: my_fixtures.setup_db
     teardown: my_fixtures.teardown_db
-    scope: module
+    scope: eval
 
   cache:
     setup: my_fixtures.setup_cache
-    scope: session
+    scope: file
 ```
 
 ---

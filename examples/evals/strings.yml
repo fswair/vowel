@@ -6,12 +6,12 @@ examples.evals.functions.is_palindrome:
     IsBool:
       type: bool
   dataset:
-    - case: { input: "racecar", expected: true }
-    - case: { input: "hello", expected: false }
-    - case: { input: "A man a plan a canal Panama", expected: true }
-    - case: { input: "Was it a rat I saw", expected: true }
-    - case: { input: "12321", expected: true }
-    - case: { input: "", expected: true }
+    - case: { id: palindrome_racecar, input: "racecar", expected: true }
+    - case: { id: palindrome_hello_false, input: "hello", expected: false }
+    - case: { id: palindrome_phrase_panama, input: "A man a plan a canal Panama", expected: true }
+    - case: { id: palindrome_phrase_rat, input: "Was it a rat I saw", expected: true }
+    - case: { id: palindrome_numeric, input: "12321", expected: true }
+    - case: { id: palindrome_empty_string, input: "", expected: true }
 
 examples.evals.functions.count_words:
   evals:
@@ -20,10 +20,10 @@ examples.evals.functions.count_words:
     NonNegative:
       assertion: "output >= 0"
   dataset:
-    - case: { input: "Hello world from Python", expected: 4 }
-    - case: { input: "Single", expected: 1 }
-    - case: { input: "", expected: 0 }
-    - case: { input: "  spaces  ", expected: 1 }
+    - case: { id: count_words_sentence, input: "Hello world from Python", expected: 4 }
+    - case: { id: count_words_single, input: "Single", expected: 1 }
+    - case: { id: count_words_empty, input: "", expected: 0 }
+    - case: { id: count_words_trim_spaces, input: "  spaces  ", expected: 1 }
 
 examples.evals.functions.get_file_extension:
   evals:
@@ -32,11 +32,11 @@ examples.evals.functions.get_file_extension:
     LowercaseOnly:
       pattern: "^[a-z0-9]*$"
   dataset:
-    - case: { input: "document.txt", expected: "txt" }
-    - case: { input: "image.PNG", expected: "png" }
-    - case: { input: "archive.tar.gz", expected: "gz" }
-    - case: { input: "noextension", expected: "" }
-    - case: { input: "script.py", expected: "py" }
+    - case: { id: ext_txt, input: "document.txt", expected: "txt" }
+    - case: { id: ext_png_uppercase, input: "image.PNG", expected: "png" }
+    - case: { id: ext_multi_dot_gz, input: "archive.tar.gz", expected: "gz" }
+    - case: { id: ext_no_extension, input: "noextension", expected: "" }
+    - case: { id: ext_py, input: "script.py", expected: "py" }
 
 examples.evals.functions.extract_hashtags:
   evals:
@@ -46,11 +46,14 @@ examples.evals.functions.extract_hashtags:
       assertion: "all(tag.startswith('#') for tag in output) if output else True"
   dataset:
     - case:
+        id: hashtags_two_tags
         input: "Learning #python and #coding today!"
         expected: ["#python", "#coding"]
     - case:
+        id: hashtags_none
         input: "No hashtags here"
         expected: []
     - case:
+        id: hashtags_three_tags
         input: "#AI #ML #DL"
         expected: ["#AI", "#ML", "#DL"]

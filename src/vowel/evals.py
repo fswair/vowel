@@ -79,7 +79,83 @@ def _eval_type_restricted(type_expr: str) -> typing.Any:
     return eval(type_expr, env, env)
 
 
-def prepare_env_and_condition(ctx: EvaluatorContext, condition: str) -> tuple[dict, str]:
+def _apply_serializer_for_assertion(
+    value: typing.Any,
+    serializer: type | typing.Callable | dict[str, type | typing.Callable] | None,
+    *,
+    param_name: str | None = None,
+) -> typing.Any:
+    """Apply serializer in assertion path to mirror function call conversions."""
+    if serializer is None:
+        return value
+
+    if isinstance(serializer, dict):
+        if param_name and param_name in serializer:
+            return _apply_serializer_for_assertion(value, serializer[param_name])
+        if isinstance(value, dict):
+            converted: dict[str, typing.Any] = {}
+            for key, item in value.items():
+                if key in serializer:
+                    converted[key] = _apply_serializer_for_assertion(item, serializer[key])
+                else:
+                    converted[key] = item
+            return converted
+        return value
+
+    if isinstance(value, dict):
+        try:
+            return serializer(**value)
+        except TypeError:
+            return serializer(value)
+
+    return serializer(value)
+
+
+def _normalize_input_for_assertion(
+    raw_inputs: typing.Any,
+    serializer: type | typing.Callable | dict[str, type | typing.Callable] | None,
+    serializer_fn: typing.Callable[[dict], typing.Any] | None,
+) -> typing.Any:
+    """Compute assertion `input` value from raw case inputs using active serializer config."""
+    if not isinstance(raw_inputs, dict):
+        return _apply_serializer_for_assertion(raw_inputs, serializer)
+
+    if serializer_fn is not None:
+        serialized = serializer_fn(raw_inputs)
+        if isinstance(serialized, tuple):
+            return serialized[0] if len(serialized) == 1 else serialized
+        return serialized
+
+    if "input" in raw_inputs:
+        return _apply_serializer_for_assertion(raw_inputs["input"], serializer)
+
+    if "inputs" in raw_inputs:
+        values = raw_inputs["inputs"]
+        if values is None:
+            return None
+        if isinstance(values, dict):
+            if serializer is not None and not isinstance(serializer, dict):
+                return _apply_serializer_for_assertion(values, serializer)
+            if isinstance(serializer, dict):
+                return {
+                    key: _apply_serializer_for_assertion(item, serializer, param_name=key)
+                    for key, item in values.items()
+                }
+            return values
+        if serializer is None:
+            return values
+        return [_apply_serializer_for_assertion(item, serializer) for item in values]
+
+    return raw_inputs
+
+
+def prepare_env_and_condition(
+    ctx: EvaluatorContext,
+    condition: str,
+    *,
+    serializer: type | typing.Callable | dict[str, type | typing.Callable] | None = None,
+    serializer_fn: typing.Callable[[dict], typing.Any] | None = None,
+) -> tuple[dict, str]:
     """
     Prepare environment variables and format condition string for evaluation.
 
@@ -90,12 +166,7 @@ def prepare_env_and_condition(ctx: EvaluatorContext, condition: str) -> tuple[di
     Returns:
         Tuple of (environment dict, formatted condition string)
     """
-    actual_input = ctx.inputs
-    if isinstance(ctx.inputs, dict):
-        if "input" in ctx.inputs:
-            actual_input = ctx.inputs["input"]
-        elif "inputs" in ctx.inputs:
-            actual_input = ctx.inputs["inputs"]
+    actual_input = _normalize_input_for_assertion(ctx.inputs, serializer, serializer_fn)
 
     env = {
         "input": actual_input,
@@ -122,9 +193,18 @@ class AssertionEvaluator(Evaluator):
     metrics, metadata, and duration variables.
     """
 
-    def __init__(self, condition: str, *, evaluation_name: str = "Assertion"):
+    def __init__(
+        self,
+        condition: str,
+        *,
+        evaluation_name: str = "Assertion",
+        serializer: type | typing.Callable | dict[str, type | typing.Callable] | None = None,
+        serializer_fn: typing.Callable[[dict], typing.Any] | None = None,
+    ):
         self.condition = condition
         self.evaluation_name = evaluation_name
+        self.serializer = serializer
+        self.serializer_fn = serializer_fn
         self.interpreter = None
         if MONTY_AVAILABLE:
             import pydantic_monty
@@ -141,7 +221,12 @@ class AssertionEvaluator(Evaluator):
             return EvaluationReason(value=True, reason="Skipped (exception case)")
         if "__import__" in self.condition:
             raise ValueError(f"__import__ is not allowed in assertions: {self.condition}")
-        env, condition = prepare_env_and_condition(ctx, self.condition)
+        env, condition = prepare_env_and_condition(
+            ctx,
+            self.condition,
+            serializer=self.serializer,
+            serializer_fn=self.serializer_fn,
+        )
 
         # TL;DR
         # BETA API
