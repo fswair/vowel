@@ -19,7 +19,7 @@ from pydantic_evals.evaluators import (
     OutputConfig,  # noqa: F401
 )
 
-MONTY_AVAILABLE = bool(importlib.util.find_spec("pydantic-monty"))
+MONTY_AVAILABLE = bool(importlib.util.find_spec("pydantic_monty"))
 
 SAFE_ASSERTION_BUILTINS = {
     "abs": abs,
